@@ -236,6 +236,9 @@
       </select>
       without keyboard or mouse input
     </label>
+    <label><input type="checkbox" id="startup"> <span id="startup-label">Start automatically</span> when you sign in</label>
+    <span id="backup" hidden>Backup: <button type="button" class="link" id="export-btn">Export…</button>
+      · <button type="button" class="link" id="import-btn">Import…</button></span>
     <span id="privacy-line">All data stays on this computer.</span>
     <span id="usage" title="CPU and memory used by AppTime's background tracker (shown as AppTime in Task Manager)"></span>
     <button type="button" class="link" id="share-link">Community sharing: off</button>
@@ -331,6 +334,8 @@ function render() {
   $("status-text").innerHTML = `<span class="dot"></span>${d.paused ? "Paused" : "Tracking"}`;
   $("pause-btn").textContent = d.paused ? "Resume" : "Pause";
   $("idle").value = String(d.idle_minutes);
+  $("startup").checked = !!d.startup;
+  $("startup-label").textContent = "Start AppTime automatically";
   if (d.usage) $("usage").textContent = `AppTime is using ${d.usage.cpu_percent.toFixed(1)}% CPU · ${Math.round(d.usage.memory_mb)} MB memory`;
 
   $("filter").classList.toggle("on", !!d.app);
@@ -581,6 +586,25 @@ $("filter-clear").addEventListener("click", () => { state.app = null; load(); })
 $("table-toggle").addEventListener("click", () => { state.showTable = !state.showTable; render(); });
 $("pause-btn").addEventListener("click", () => post({ paused: !state.data.paused }));
 $("idle").addEventListener("change", e => post({ idle_minutes: +e.target.value }));
+$("startup").addEventListener("change", e => post({ startup: e.target.checked }));
+
+// Backups use the window's native Save / Open dialogs (only in the AppTime window).
+function showBackup() { if (window.pywebview && window.pywebview.api) $("backup").hidden = false; }
+window.addEventListener("pywebviewready", showBackup);
+showBackup();
+$("export-btn").addEventListener("click", async () => {
+  const r = await window.pywebview.api.export_data();
+  if (r.cancelled) return;
+  alert(r.error || `Backup saved (${r.days} days of screen time):\n${r.path}\n\nKeep it somewhere safe, like a USB stick or Google Drive.`);
+});
+$("import-btn").addEventListener("click", async () => {
+  if (!confirm("Import a backup? Its time is added to what's already on this computer. Importing the same backup twice is safe: nothing gets counted double.")) return;
+  const r = await window.pywebview.api.import_data();
+  if (r.cancelled) return;
+  if (r.error) { alert(r.error); return; }
+  alert(`Imported ${r.days} days of screen time.`);
+  load();
+});
 let resizeTimer;
 window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => state.data && renderChart(state.data), 120); });
 // Keep "today" live while the page is open.

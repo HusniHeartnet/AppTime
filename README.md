@@ -12,15 +12,18 @@ From the [latest release](https://github.com/HusniHeartnet/AppTime/releases/late
 
 **Windows:** download **AppTime.exe** and run it. No installation needed.
 Windows may show "Windows protected your PC" because the app isn't code-signed.
-Click **More info → Run anyway**. The AppTime cat appears in the system tray: click it
-to open your dashboard, right-click it to pause tracking, turn on **Start with Windows**, or quit.
+Click **More info → Run anyway**. Tip: move it out of Downloads first, e.g. into a folder in Documents.
+The AppTime cat appears in the system tray: click it to open your dashboard, right-click it to
+pause tracking or quit. AppTime starts automatically when you sign in; you can turn that off
+in the tray menu or at the bottom of the dashboard.
 
 **Mac** (Apple Silicon, M1 or newer): download **AppTime-mac.zip**, open it, and drag
 **AppTime** into your Applications folder. The first time you open it, macOS will say it
 can't check the app for malicious software, because it isn't notarized by Apple. Click
 **Done**, then open **System Settings → Privacy & Security**, scroll down and click
 **Open Anyway**. The AppTime cat appears in the menu bar at the top of the screen. Click it
-for the dashboard, pausing, **Open at Login**, or quitting. AppTime needs no special
+for the dashboard, pausing, or quitting. It opens automatically when you log in; you can turn
+that off with **Open at Login** in the menu. AppTime needs no special
 permissions on Mac.
 
 ## How it counts
@@ -54,6 +57,17 @@ Everything is stored on your computer: `%LOCALAPPDATA%\AppTime\apptime.db` on Wi
 `~/Library/Application Support/AppTime/apptime.db` on Mac. Only app names and
 time are stored, never window titles. Delete that file to start over.
 
+### Moving to a new computer, or reinstalling
+
+Your history lives only on your computer, so back it up before reinstalling or switching:
+
+1. In the dashboard, click **Export…** (bottom of the page) and save the backup file somewhere
+   safe: a USB stick, Google Drive, OneDrive or iCloud.
+2. On the new computer, install AppTime, click **Import…** and pick that file.
+
+Importing adds the backup to whatever is already there, and importing the same backup twice
+never counts anything double. Backups work between Windows and Mac too.
+
 ## Community sharing (optional)
 
 On first launch AppTime asks whether you'd like to share **anonymous daily app totals** with
@@ -84,8 +98,8 @@ Push a version tag and GitHub Actions builds the Windows and Mac apps, self-test
 and attaches them to a release:
 
 ```
-git tag v1.4.0
-git push origin v1.4.0
+git tag v1.5.0
+git push origin v1.5.0
 ```
 
 The community server lives in [`server/`](server/README.md).

@@ -17,6 +17,7 @@ import urllib.request
 import datetime as dt
 import json
 import os
+import pathlib
 import sqlite3
 import subprocess
 import sys
@@ -32,7 +33,7 @@ else:
     import platform_win as osx
 
 APP_NAME = "AppTime"
-APP_VERSION = "1.4.0"
+APP_VERSION = "1.5.0"
 
 # Community sharing (see server/README.md). Sharing is only offered when the
 # URL is set AND server_cert.pem (the server's own certificate) is present;
@@ -124,6 +125,65 @@ def get_setting(conn, key, default):
 def set_setting(conn, key, value):
     conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, json.dumps(value)))
     conn.commit()
+
+
+# ---------------------------------------------------------------- backup
+
+BACKUP_EXTENSION = ".apptime"
+
+
+def export_backup(path):
+    """Save a copy of all tracked time to `path` (an SQLite file)."""
+    src = connect()
+    dest = sqlite3.connect(path)
+    try:
+        src.backup(dest)
+        # The community-sharing ID and its secret stay on this computer only:
+        # anyone holding them could delete this person's shared data.
+        dest.execute("DELETE FROM settings WHERE key = 'share'")
+        dest.commit()
+        days = dest.execute("SELECT COUNT(DISTINCT day) FROM screen").fetchone()[0]
+    finally:
+        dest.close()
+        src.close()
+    return {"path": path, "days": days}
+
+
+def import_backup(path):
+    """Merge a backup into this computer's data.
+
+    For each app and hour, the larger of the two values is kept, so importing
+    the same backup twice never double-counts."""
+    try:
+        src = sqlite3.connect(pathlib.Path(path).resolve().as_uri() + "?mode=ro", uri=True)
+        tables = {r[0] for r in src.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    except sqlite3.DatabaseError:
+        raise ValueError("That file isn't an AppTime backup.")
+    try:
+        if not {"usage", "apps"} <= tables:
+            raise ValueError("That file isn't an AppTime backup.")
+        usage = src.execute("SELECT day, hour, exe, seconds FROM usage").fetchall()
+        if "screen" in tables:
+            screen = src.execute("SELECT day, hour, seconds FROM screen").fetchall()
+        else:  # backups from before screen time was stored separately
+            screen = src.execute("SELECT day, hour, SUM(seconds) FROM usage GROUP BY day, hour").fetchall()
+        apps = src.execute("SELECT exe, name, path FROM apps").fetchall()
+    finally:
+        src.close()
+    usage = [u for u in usage if u[2] not in osx.IGNORED]
+    conn = connect()
+    try:
+        conn.executemany(
+            """INSERT INTO usage (day, hour, exe, seconds) VALUES (?, ?, ?, ?)
+               ON CONFLICT (day, hour, exe) DO UPDATE SET seconds = MAX(seconds, excluded.seconds)""", usage)
+        conn.executemany(
+            """INSERT INTO screen (day, hour, seconds) VALUES (?, ?, ?)
+               ON CONFLICT (day, hour) DO UPDATE SET seconds = MAX(seconds, excluded.seconds)""", screen)
+        conn.executemany("INSERT OR IGNORE INTO apps (exe, name, path) VALUES (?, ?, ?)", apps)
+        conn.commit()
+    finally:
+        conn.close()
+    return {"days": len({row[0] for row in screen})}
 
 
 # ---------------------------------------------------------------- tracker
@@ -573,6 +633,8 @@ def make_handler(tracker):
                 data["paused"] = tracker.paused
                 data["idle_minutes"] = tracker.idle_minutes
                 data["usage"] = self_usage.sample()
+                data["startup"] = osx.startup_enabled()
+                data["startup_label"] = osx.STARTUP_LABEL
                 return self.send(200, data)
             if url.path == "/api/share":
                 conn = connect()
@@ -603,7 +665,22 @@ def make_handler(tracker):
                     conn.close()
                 if "paused" in body:
                     tracker.paused = bool(body["paused"])
+                if "startup" in body:
+                    set_startup(bool(body["startup"]))
                 return self.send(200, {"ok": True})
+            if url.path in ("/api/export", "/api/import"):
+                path = str(body.get("path") or "")
+                if not path:
+                    return self.send(400, {"error": "No file chosen."})
+                try:
+                    if url.path == "/api/export":
+                        tracker.flush()
+                        return self.send(200, export_backup(path))
+                    return self.send(200, import_backup(path))
+                except ValueError as e:
+                    return self.send(400, {"error": str(e)})
+                except (OSError, sqlite3.Error) as e:
+                    return self.send(500, {"error": f"Couldn't use that file ({e})."})
             if url.path == "/api/share" and sharing_available():
                 conn = connect()
                 try:
@@ -677,8 +754,44 @@ def run_window():
         return
     osx.prepare_window()
 
+    def call(path, payload):
+        req = urllib.request.Request(URL.rstrip("/") + path, data=json.dumps(payload).encode(), method="POST",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=120) as res:
+                return json.loads(res.read())
+        except urllib.error.HTTPError as e:
+            return json.loads(e.read() or b"{}") or {"error": "Something went wrong."}
+        except OSError:
+            return {"error": "AppTime isn't running."}
+
+    dialogs = getattr(webview, "FileDialog", None)
+    save_dialog = dialogs.SAVE if dialogs else webview.SAVE_DIALOG
+    open_dialog = dialogs.OPEN if dialogs else webview.OPEN_DIALOG
+
+    class Api:
+        """Called from the dashboard page (window.pywebview.api)."""
+
+        def export_data(self):
+            name = f"AppTime backup {dt.date.today().isoformat()}{BACKUP_EXTENSION}"
+            chosen = win.create_file_dialog(save_dialog, save_filename=name,
+                                            file_types=(f"AppTime backup (*{BACKUP_EXTENSION})",))
+            if not chosen:
+                return {"cancelled": True}
+            path = chosen if isinstance(chosen, str) else chosen[0]
+            if not path.lower().endswith(BACKUP_EXTENSION):
+                path += BACKUP_EXTENSION
+            return call("/api/export", {"path": path})
+
+        def import_data(self):
+            chosen = win.create_file_dialog(open_dialog, file_types=(
+                f"AppTime backup (*{BACKUP_EXTENSION};*.db)", "All files (*.*)"))
+            if not chosen:
+                return {"cancelled": True}
+            return call("/api/import", {"path": chosen if isinstance(chosen, str) else chosen[0]})
+
     win = webview.create_window(
-        APP_NAME, URL, width=1120, height=860, min_size=(400, 500),
+        APP_NAME, URL, width=1120, height=860, min_size=(400, 500), js_api=Api(),
         background_color="#111110" if osx.dark_mode() else "#f4f4f2",
     )
 
@@ -720,6 +833,31 @@ def main_is_running():
 
 # ---------------------------------------------------------------- startup / tray
 
+def set_startup(enabled):
+    osx.set_startup(enabled, own_command())
+    conn = connect()
+    set_setting(conn, "startup_decided", True)  # never switch it back on by ourselves
+    conn.close()
+
+
+def ensure_startup():
+    """Installed app: start automatically at sign-in, unless the person turned
+    that off. Also keeps the entry pointing at the app's current location if
+    the app file was moved."""
+    if not getattr(sys, "frozen", False):
+        return  # running from source code: leave it to the person
+    conn = connect()
+    decided = get_setting(conn, "startup_decided", False)
+    conn.close()
+    try:
+        if not decided:
+            set_startup(True)
+        elif osx.startup_enabled():
+            osx.set_startup(True, own_command())
+    except OSError:
+        pass
+
+
 def tray_image():
     from PIL import Image, ImageDraw
     path = os.path.join(RESOURCE_DIR, "assets", "tray.png")
@@ -744,7 +882,7 @@ def run_tray(tracker, server):
         tracker.paused = not tracker.paused
 
     def toggle_startup(icon, item):
-        osx.set_startup(not osx.startup_enabled(), own_command())
+        set_startup(not osx.startup_enabled())
 
     def quit_app(icon, item):
         icon.stop()
@@ -792,6 +930,7 @@ def main():
         return
 
     tracker = Tracker()
+    ensure_startup()
     server.RequestHandlerClass = make_handler(tracker)
     threading.Thread(target=tracker.run, daemon=True).start()
     threading.Thread(target=server.serve_forever, daemon=True).start()
