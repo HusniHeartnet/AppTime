@@ -35,7 +35,7 @@ else:
     import platform_win as osx
 
 APP_NAME = "AppTime"
-APP_VERSION = "1.7.0"
+APP_VERSION = "1.8.0"
 
 # Community sharing (see server/README.md). Sharing is only offered when the
 # URL is set AND server_cert.pem (the server's own certificate) is present;

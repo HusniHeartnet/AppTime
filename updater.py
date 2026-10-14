@@ -1,8 +1,8 @@
-"""Checks GitHub for a newer AppTime and installs it in place.
+"""Checks GitHub for a newer AppTime and installs it.
 
-Windows: the running AppTime.exe is renamed to AppTime.old.exe (Windows allows
-renaming a running program), the new one takes its name, and it's started.
-macOS: the AppTime.app bundle is swapped the same way.
+Windows: downloads the installer (AppTime-Setup.exe) and runs it silently.
+It closes this copy, upgrades the installed AppTime and starts it again.
+macOS: the AppTime.app bundle is swapped for the new one and started.
 
 The download is checked against the size and SHA-256 checksum GitHub publishes
 for the release file before anything is replaced.
@@ -24,7 +24,7 @@ REPO = "HusniHeartnet/AppTime"
 API_URL = os.environ.get("APPTIME_UPDATE_API", f"https://api.github.com/repos/{REPO}/releases/latest")
 RELEASES_PAGE = f"https://github.com/{REPO}/releases/latest"
 CHECK_EVERY_SECONDS = 12 * 3600
-ASSET_NAME = "AppTime-mac.zip" if sys.platform == "darwin" else "AppTime.exe"
+ASSET_NAME = "AppTime-mac.zip" if sys.platform == "darwin" else "AppTime-Setup.exe"
 
 
 def version_tuple(text):
@@ -125,8 +125,10 @@ class Updater:
     def can_install(self):
         location = installed_location()
         if not location:
-            return False
-        if sys.platform == "darwin" and "/AppTranslocation/" in location:
+            return False  # running from source code
+        if sys.platform != "darwin":
+            return True  # the installer takes care of it
+        if "/AppTranslocation/" in location:
             return False  # macOS runs un-moved downloads from a read-only copy
         return os.access(os.path.dirname(location), os.W_OK)
 
@@ -140,9 +142,14 @@ class Updater:
     def _install(self):
         location = installed_location()
         try:
-            download = self._download(os.path.dirname(location))
-            self.status = "installing"
-            command = self._swap_windows(location, download) if sys.platform != "darwin" else self._swap_mac(location, download)
+            if sys.platform == "darwin":
+                download = self._download(os.path.dirname(location))
+                self.status = "installing"
+                command = self._swap_mac(location, download)
+            else:
+                download = self._download(tempfile.mkdtemp(prefix="apptime-update-"))
+                self.status = "installing"
+                command = self._run_installer(download)
         except Exception as e:
             self.status, self.message = "error", f"Update failed: {e}"
             return
@@ -175,17 +182,11 @@ class Updater:
             raise
         return target
 
-    def _swap_windows(self, exe, download):
-        old = old_copy_path(exe)
-        if os.path.exists(old):
-            os.remove(old)
-        os.replace(exe, old)  # renaming a running .exe is allowed on Windows
-        try:
-            os.replace(download, exe)
-        except OSError:
-            os.replace(old, exe)  # put the current version back
-            raise
-        return [exe, "--after-update"]
+    def _run_installer(self, download):
+        setup = os.path.join(os.path.dirname(download), ASSET_NAME)
+        os.replace(download, setup)
+        # /APPTIMELAUNCH: start AppTime again when done (see installer/AppTime.iss).
+        return [setup, "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/APPTIMELAUNCH"]
 
     def _swap_mac(self, bundle, download):
         unpacked = tempfile.mkdtemp(prefix="apptime-update-")

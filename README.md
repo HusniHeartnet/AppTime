@@ -16,7 +16,6 @@ account (no admin password needed), adds it to the Start menu, and starts it. Wi
 The AppTime cat appears in the system tray: click it to open your dashboard, right-click it to
 pause tracking or quit. AppTime starts automatically when you sign in; you can turn that off
 in the tray menu or at the bottom of the dashboard. To uninstall, use **Settings → Apps**.
-(Prefer no installer? **AppTime.exe** is a portable version that runs from any folder.)
 
 **Mac** (Apple Silicon, M1 or newer): download **AppTime.dmg**, open it, and drag **AppTime**
 into **Applications**. The first time you open it, macOS will say it can't check the app for
@@ -102,12 +101,12 @@ Use `--no-tray` to run it in a console, or `--selftest` to check tracking works 
 
 ## Making a release
 
-Push a version tag and GitHub Actions builds the Windows installer and portable app and the
-Mac disk image, tests them (including a full install and uninstall), and attaches them to a release:
+Push a version tag and GitHub Actions builds the Windows installer and the Mac disk image,
+tests them (including install, in-app update and uninstall), and attaches them to a release:
 
 ```
-git tag v1.7.0
-git push origin v1.7.0
+git tag v1.8.0
+git push origin v1.8.0
 ```
 
 The community server lives in [`server/`](server/README.md).

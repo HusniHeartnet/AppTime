@@ -55,9 +55,11 @@ Name: "{autodesktop}\AppTime"; Filename: "{app}\AppTime.exe"; Tasks: desktopicon
 [Run]
 ; AppTime sets up starting at sign-in by itself when it runs.
 Filename: "{app}\AppTime.exe"; Description: "Start AppTime"; Flags: nowait postinstall skipifsilent
+; In-app updates run this installer silently with /APPTIMELAUNCH: start AppTime again afterwards.
+Filename: "{app}\AppTime.exe"; Parameters: "--after-update"; Flags: nowait; Check: LaunchAfterUpdate
 
 [UninstallDelete]
-; Left behind by in-app updates.
+; Left behind by in-app updates of older versions.
 Type: files; Name: "{app}\AppTime.old.exe"
 Type: files; Name: "{app}\.AppTime.exe.download"
 
@@ -76,6 +78,16 @@ begin
   Sleep(1500);
   Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /IM AppTime.exe', '', SW_HIDE, ewWaitUntilTerminated, Code);
   Sleep(500);
+end;
+
+function LaunchAfterUpdate(): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/APPTIMELAUNCH') = 0 then
+      Result := True;
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;

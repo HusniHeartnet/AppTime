@@ -79,6 +79,9 @@ jobs:
           }
           "Install and uninstall OK"
 
+      - name: Test in-app update (install, Update now, restart, uninstall)
+        run: python tests/update_e2e.py dist/AppTime-Setup.exe
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -151,7 +154,6 @@ jobs:
         with:
           files: |
             windows/AppTime-Setup.exe
-            windows/AppTime.exe
             macos/AppTime.dmg
             macos/AppTime-mac.zip
           generate_release_notes: true
