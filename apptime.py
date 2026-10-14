@@ -1040,7 +1040,9 @@ def run_window():
                     return
 
     try:
-        webview.start(watch_focus, private_mode=True)
+        # Classic-bitmap .ico: .NET garbles PNG-compressed icon images.
+        icon = os.path.join(RESOURCE_DIR, "assets", "AppTime.ico")
+        webview.start(watch_focus, private_mode=True, icon=icon if os.path.exists(icon) else None)
     except Exception:
         webbrowser.open(URL)  # e.g. the WebView2 runtime is missing
     # Window closed: end this process right away so all its memory is freed,
