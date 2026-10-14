@@ -48,7 +48,37 @@ RESOURCE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__
 SERVER_CERT_PATH = os.path.join(RESOURCE_DIR, "server_cert.pem")
 
 # Foreground "apps" that aren't really you using an app.
-IGNORED_EXES = {"lockapp.exe", "logonui.exe", "screenclippinghost.exe", ""}
+# The lock and sign-in screens: nothing counts while they're up.
+LOCK_EXES = {"lockapp.exe", "logonui.exe"}
+
+# Windows' own tools and interface aren't "apps you spend time on", so they
+# aren't counted at all (not as app time, not as screen time, never shared).
+IGNORED_EXES = LOCK_EXES | {
+    "",
+    "apptime.exe",                   # AppTime's own dashboard
+    # Windows tools
+    "explorer.exe",                  # File Explorer and the desktop
+    "taskmgr.exe",                   # Task Manager
+    "systemsettings.exe",            # Settings
+    "resmon.exe", "perfmon.exe",     # Resource / Performance Monitor
+    "mmc.exe",                       # Device Manager, Disk Management, ...
+    "control.exe",                   # Control Panel
+    "openwith.exe", "pickerhost.exe",  # "Open with" and file picker dialogs
+    "consent.exe",                   # admin permission (UAC) prompts
+    "rundll32.exe", "dllhost.exe",   # helper processes behind system dialogs
+    # Windows' own interface
+    "searchhost.exe", "searchapp.exe", "searchui.exe",  # Start search
+    "startmenuexperiencehost.exe",   # Start menu
+    "shellexperiencehost.exe",       # notifications, clock, quick settings
+    "shellhost.exe",
+    "textinputhost.exe",             # touch keyboard, emoji picker
+    "screenclippinghost.exe",        # snipping overlay
+    "applicationframehost.exe",      # frame of Store apps (the app itself is counted)
+    "lockapp.exe", "logonui.exe",
+}
+
+# Processes of this running AppTime (the tracker and its dashboard window).
+OWN_PIDS = {os.getpid()}
 
 
 # ---------------------------------------------------------------- Win32 bits
@@ -238,8 +268,8 @@ def visible_exe_paths():
     """Paths of every app with a window you can actually see, plus the focused app."""
     paths = set()
     fg = user32.GetForegroundWindow()
-    fg_path = window_exe_path(fg) if fg else None
-    if fg_path and os.path.basename(fg_path).lower() in IGNORED_EXES:
+    fg_path = window_exe_path(fg) if fg and window_pid(fg) not in OWN_PIDS else None
+    if fg_path and os.path.basename(fg_path).lower() in LOCK_EXES:
         return set()  # lock screen / sign-in screen
     if fg_path:
         paths.add(fg_path)
@@ -248,7 +278,7 @@ def visible_exe_paths():
         if not uncovered:
             break
         shown = sum(area(intersect(r, rect)) for r in uncovered)
-        if shown >= MIN_VISIBLE_PIXELS and shown >= MIN_VISIBLE_FRACTION * area(rect):
+        if shown >= MIN_VISIBLE_PIXELS and shown >= MIN_VISIBLE_FRACTION * area(rect) and window_pid(hwnd) not in OWN_PIDS:
             path = window_exe_path(hwnd)
             if path:
                 paths.add(path)
@@ -383,6 +413,9 @@ class Tracker:
         conn = connect()
         self.idle_minutes = get_setting(conn, "idle_minutes", DEFAULT_IDLE_MINUTES)
         self.known_apps = {r[0] for r in conn.execute("SELECT exe FROM apps")}
+        ignored = sorted(IGNORED_EXES - {""})
+        conn.execute(f"DELETE FROM usage WHERE exe IN ({','.join('?' * len(ignored))})", ignored)
+        conn.commit()
         conn.close()
 
     def run(self):
@@ -894,6 +927,7 @@ class DashboardWindow:
             return
         try:
             self.proc = subprocess.Popen(own_command("--window"))
+            OWN_PIDS.add(self.proc.pid)
         except OSError:
             webbrowser.open(URL)
 

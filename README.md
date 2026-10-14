@@ -27,6 +27,8 @@ pause tracking, turn on **Start with Windows**, or quit.
 - With no keyboard or mouse input for 5 minutes (changeable at the bottom of the dashboard),
   it stops counting until you're back. Sleep and the lock screen aren't counted.
 - Counting starts when you first run it.
+- Windows' own tools and interface aren't counted: File Explorer, Task Manager, Settings,
+  the Start menu and search, system dialogs, and AppTime itself.
 
 ## Light on your PC
 

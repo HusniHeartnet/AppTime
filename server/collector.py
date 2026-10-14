@@ -48,6 +48,16 @@ ID_RE = re.compile(r"^[0-9a-f]{32}$")
 EXE_RE = re.compile(r"^[a-z0-9 ._+()&'-]{1,80}\.exe$")
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# Windows' own tools and interface aren't counted (AppTime 1.3+ doesn't send
+# them; this also drops them from older versions' uploads).
+SYSTEM_EXES = {
+    "apptime.exe", "explorer.exe", "taskmgr.exe", "systemsettings.exe", "resmon.exe", "perfmon.exe",
+    "mmc.exe", "control.exe", "openwith.exe", "pickerhost.exe", "consent.exe", "rundll32.exe",
+    "dllhost.exe", "searchhost.exe", "searchapp.exe", "searchui.exe", "startmenuexperiencehost.exe",
+    "shellexperiencehost.exe", "shellhost.exe", "textinputhost.exe", "screenclippinghost.exe",
+    "applicationframehost.exe", "lockapp.exe", "logonui.exe",
+}
+
 db_lock = threading.Lock()
 rate = {}  # ip -> [timestamps]
 
@@ -132,7 +142,7 @@ def validate_days(days):
         for a in apps:
             exe = str(a.get("exe", "")).lower()
             secs = int(a.get("seconds", 0))
-            if not EXE_RE.match(exe) or not 0 < secs <= 86400:
+            if not EXE_RE.match(exe) or exe in SYSTEM_EXES or not 0 < secs <= 86400:
                 continue
             clean_apps[exe] = (clean_name(a.get("name")) or exe[:-4], min(secs, screen))
         out.append((day, screen, clean_apps))
@@ -384,7 +394,10 @@ def purge_old_data():
 
 
 def main():
-    connect().close()
+    conn = connect()
+    conn.execute(f"DELETE FROM app_days WHERE exe IN ({','.join('?' * len(SYSTEM_EXES))})", sorted(SYSTEM_EXES))
+    conn.commit()
+    conn.close()
     threading.Thread(target=purge_old_data, daemon=True).start()
 
     report = ThreadingHTTPServer(("127.0.0.1", REPORT_PORT), ReportHandler)
