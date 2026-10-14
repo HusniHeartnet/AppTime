@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "AppTime"
-APP_VERSION = "1.2"
+APP_VERSION = "1.2.0"
 
 # Community sharing (see server/README.md). Sharing is only offered when the
 # URL is set AND server_cert.pem (the server's own certificate) is present;
