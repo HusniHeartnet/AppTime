@@ -2,20 +2,26 @@
 
 # AppTime
 
-Screen time for your Windows PC, like the one on your phone. AppTime records how
+Screen time for your Windows PC or Mac, like the one on your phone. AppTime records how
 long each app is on your screen and shows the totals per day, week, month, year
 and lifetime. What you make of the numbers is up to you.
 
 ## Download
 
-Get **AppTime.exe** from the [latest release](https://github.com/HusniHeartnet/AppTime/releases/latest)
-and run it. No installation and no Python needed.
+From the [latest release](https://github.com/HusniHeartnet/AppTime/releases/latest):
 
+**Windows:** download **AppTime.exe** and run it. No installation needed.
 Windows may show "Windows protected your PC" because the app isn't code-signed.
-Click **More info → Run anyway**.
+Click **More info → Run anyway**. The AppTime cat appears in the system tray: click it
+to open your dashboard, right-click it to pause tracking, turn on **Start with Windows**, or quit.
 
-The AppTime cat appears in the system tray. Click it to open your dashboard in its own window. Right-click it to
-pause tracking, turn on **Start with Windows**, or quit.
+**Mac** (Apple Silicon, M1 or newer): download **AppTime-mac.zip**, open it, and drag
+**AppTime** into your Applications folder. The first time you open it, macOS will say it
+can't check the app for malicious software, because it isn't notarized by Apple. Click
+**Done**, then open **System Settings → Privacy & Security**, scroll down and click
+**Open Anyway**. The AppTime cat appears in the menu bar at the top of the screen. Click it
+for the dashboard, pausing, **Open at Login**, or quitting. AppTime needs no special
+permissions on Mac.
 
 ## How it counts
 
@@ -27,8 +33,9 @@ pause tracking, turn on **Start with Windows**, or quit.
 - With no keyboard or mouse input for 5 minutes (changeable at the bottom of the dashboard),
   it stops counting until you're back. Sleep and the lock screen aren't counted.
 - Counting starts when you first run it.
-- Windows' own tools and interface aren't counted: File Explorer, Task Manager, Settings,
-  the Start menu and search, system dialogs, and AppTime itself.
+- The system's own tools and interface aren't counted: File Explorer, Task Manager and Settings
+  on Windows; Finder, Activity Monitor and System Settings on Mac; plus menus, search,
+  system dialogs and AppTime itself.
 
 ## Light on your PC
 
@@ -38,12 +45,13 @@ AppTime runs quietly in the background. Measured on a normal Windows 11 laptop:
 - **Dashboard window:** about 110 MB more while it's open (a trimmed-down web view),
   all of it freed the moment you close the window.
 
-You'll find it as **AppTime** in Task Manager, and the bottom of the dashboard
+You'll find it as **AppTime** in Task Manager (or Activity Monitor on Mac), and the bottom of the dashboard
 shows its current CPU and memory use.
 
 ## Your data
 
-Everything is stored on your PC in `%LOCALAPPDATA%\AppTime\apptime.db`. Only app names and
+Everything is stored on your computer: `%LOCALAPPDATA%\AppTime\apptime.db` on Windows,
+`~/Library/Application Support/AppTime/apptime.db` on Mac. Only app names and
 time are stored, never window titles. Delete that file to start over.
 
 ## Community sharing (optional)
@@ -64,18 +72,20 @@ Details: [PRIVACY.md](PRIVACY.md)
 
 ```
 pip install -r requirements.txt
-pythonw apptime.py
+pythonw apptime.py        # Windows
+python3 apptime.py        # Mac
 ```
 
-Use `python apptime.py --no-tray` to run it in a console instead.
+Use `--no-tray` to run it in a console, or `--selftest` to check tracking works and exit.
 
 ## Making a release
 
-Push a version tag and GitHub Actions builds `AppTime.exe` and attaches it to a release:
+Push a version tag and GitHub Actions builds the Windows and Mac apps, self-tests both,
+and attaches them to a release:
 
 ```
-git tag v1.2.0
-git push origin v1.2.0
+git tag v1.4.0
+git push origin v1.4.0
 ```
 
 The community server lives in [`server/`](server/README.md).

@@ -1,18 +1,19 @@
-"""AppTime - screen time tracker for Windows.
+"""AppTime - screen time tracker for Windows and macOS.
 
-Records how long each app is in the foreground while you're at the laptop,
-and serves a local dashboard (day / week / month / year / lifetime).
+Records how long each app is on screen while you're at the computer, and
+serves a local dashboard (day / week / month / year / lifetime).
 
-Run:  pythonw apptime.py      (tray icon, no console)
-      python apptime.py       (same, with a console for logs)
+Run:  pythonw apptime.py      (Windows: tray icon, no console)
+      python3 apptime.py      (macOS, or with a console for logs)
+      python apptime.py --selftest   (check tracking works, then exit)
+
+The operating-system parts live in platform_win.py and platform_mac.py.
 """
 
-import ctypes
 import secrets
 import ssl
 import urllib.error
 import urllib.request
-import ctypes.wintypes as wt
 import datetime as dt
 import json
 import os
@@ -25,8 +26,13 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+if sys.platform == "darwin":
+    import platform_mac as osx
+else:
+    import platform_win as osx
+
 APP_NAME = "AppTime"
-APP_VERSION = "1.3.0"
+APP_VERSION = "1.4.0"
 
 # Community sharing (see server/README.md). Sharing is only offered when the
 # URL is set AND server_cert.pem (the server's own certificate) is present;
@@ -42,293 +48,15 @@ FLUSH_SECONDS = 30
 MAX_GAP_SECONDS = 5  # longer gaps between polls mean sleep/hibernate: not counted
 DEFAULT_IDLE_MINUTES = 5
 
-DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), APP_NAME)
+DATA_DIR = os.path.join(osx.DATA_ROOT, APP_NAME)
 DB_PATH = os.path.join(DATA_DIR, "apptime.db")
 RESOURCE_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 SERVER_CERT_PATH = os.path.join(RESOURCE_DIR, "server_cert.pem")
 
-# Foreground "apps" that aren't really you using an app.
-# The lock and sign-in screens: nothing counts while they're up.
-LOCK_EXES = {"lockapp.exe", "logonui.exe"}
-
-# Windows' own tools and interface aren't "apps you spend time on", so they
-# aren't counted at all (not as app time, not as screen time, never shared).
-IGNORED_EXES = LOCK_EXES | {
-    "",
-    "apptime.exe",                   # AppTime's own dashboard
-    # Windows tools
-    "explorer.exe",                  # File Explorer and the desktop
-    "taskmgr.exe",                   # Task Manager
-    "systemsettings.exe",            # Settings
-    "resmon.exe", "perfmon.exe",     # Resource / Performance Monitor
-    "mmc.exe",                       # Device Manager, Disk Management, ...
-    "control.exe",                   # Control Panel
-    "openwith.exe", "pickerhost.exe",  # "Open with" and file picker dialogs
-    "consent.exe",                   # admin permission (UAC) prompts
-    "rundll32.exe", "dllhost.exe",   # helper processes behind system dialogs
-    # Windows' own interface
-    "searchhost.exe", "searchapp.exe", "searchui.exe",  # Start search
-    "startmenuexperiencehost.exe",   # Start menu
-    "shellexperiencehost.exe",       # notifications, clock, quick settings
-    "shellhost.exe",
-    "textinputhost.exe",             # touch keyboard, emoji picker
-    "screenclippinghost.exe",        # snipping overlay
-    "applicationframehost.exe",      # frame of Store apps (the app itself is counted)
-    "lockapp.exe", "logonui.exe",
-}
-
-# Processes of this running AppTime (the tracker and its dashboard window).
-OWN_PIDS = {os.getpid()}
-
-
-# ---------------------------------------------------------------- Win32 bits
-
-user32 = ctypes.WinDLL("user32", use_last_error=True)
-kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-version = ctypes.WinDLL("version", use_last_error=True)
-
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-
-
-class LASTINPUTINFO(ctypes.Structure):
-    _fields_ = [("cbSize", wt.UINT), ("dwTime", wt.DWORD)]
-
-
-user32.GetForegroundWindow.restype = wt.HWND
-user32.GetWindowThreadProcessId.argtypes = [wt.HWND, ctypes.POINTER(wt.DWORD)]
-user32.GetLastInputInfo.argtypes = [ctypes.POINTER(LASTINPUTINFO)]
-kernel32.OpenProcess.restype = wt.HANDLE
-kernel32.OpenProcess.argtypes = [wt.DWORD, wt.BOOL, wt.DWORD]
-kernel32.QueryFullProcessImageNameW.argtypes = [wt.HANDLE, wt.DWORD, wt.LPWSTR, ctypes.POINTER(wt.DWORD)]
-kernel32.CloseHandle.argtypes = [wt.HANDLE]
-kernel32.GetTickCount.restype = wt.DWORD
-WNDENUMPROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
-user32.EnumChildWindows.argtypes = [wt.HWND, WNDENUMPROC, wt.LPARAM]
-
-
-def idle_seconds():
-    info = LASTINPUTINFO(cbSize=ctypes.sizeof(LASTINPUTINFO))
-    if not user32.GetLastInputInfo(ctypes.byref(info)):
-        return 0.0
-    return ((kernel32.GetTickCount() - info.dwTime) & 0xFFFFFFFF) / 1000.0
-
-
-def window_pid(hwnd):
-    pid = wt.DWORD()
-    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-    return pid.value
-
-
-def process_path(pid):
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        return None
-    try:
-        buf = ctypes.create_unicode_buffer(1024)
-        size = wt.DWORD(len(buf))
-        if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
-            return buf.value
-        return None
-    finally:
-        kernel32.CloseHandle(handle)
-
-
-def window_exe_path(hwnd):
-    pid = window_pid(hwnd)
-    path = process_path(pid) if pid else None
-    # Store apps (Settings, Calculator, ...) live inside ApplicationFrameHost;
-    # the real app is a child window owned by another process.
-    if path and os.path.basename(path).lower() == "applicationframehost.exe":
-        found = []
-
-        def cb(child, _):
-            child_pid = window_pid(child)
-            if child_pid and child_pid != pid:
-                found.append(child_pid)
-                return False
-            return True
-
-        user32.EnumChildWindows(hwnd, WNDENUMPROC(cb), 0)
-        if found:
-            path = process_path(found[0]) or path
-    return path
-
-
-def foreground_exe_path():
-    hwnd = user32.GetForegroundWindow()
-    return window_exe_path(hwnd) if hwnd else None
-
-
-# A window counts as "on screen" when at least this much of it is uncovered.
-MIN_VISIBLE_FRACTION = 0.15
-MIN_VISIBLE_PIXELS = 200 * 200
-
-GWL_EXSTYLE = -20
-WS_EX_TRANSPARENT = 0x00000020
-WS_EX_TOOLWINDOW = 0x00000080
-WS_EX_NOACTIVATE = 0x08000000
-DWMWA_EXTENDED_FRAME_BOUNDS = 9
-DWMWA_CLOAKED = 14
-SHELL_CLASSES = {"Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd"}
-
-dwmapi = ctypes.WinDLL("dwmapi")
-user32.EnumWindows.argtypes = [WNDENUMPROC, wt.LPARAM]
-user32.GetWindowLongW.argtypes = [wt.HWND, ctypes.c_int]
-user32.GetWindowLongW.restype = ctypes.c_long
-user32.GetWindowRect.argtypes = [wt.HWND, ctypes.POINTER(wt.RECT)]
-user32.GetClassNameW.argtypes = [wt.HWND, wt.LPWSTR, ctypes.c_int]
-user32.IsWindowVisible.argtypes = [wt.HWND]
-user32.IsIconic.argtypes = [wt.HWND]
-dwmapi.DwmGetWindowAttribute.argtypes = [wt.HWND, wt.DWORD, ctypes.c_void_p, wt.DWORD]
-MONITORENUMPROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HMONITOR, wt.HDC, ctypes.POINTER(wt.RECT), wt.LPARAM)
-user32.EnumDisplayMonitors.argtypes = [wt.HDC, ctypes.POINTER(wt.RECT), MONITORENUMPROC, wt.LPARAM]
-
-try:  # real pixel coordinates on scaled (125%, 150%...) displays
-    user32.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
-except Exception:
-    pass
-
-
-def monitor_rects():
-    rects = []
-
-    def cb(_mon, _hdc, rect, _):
-        r = rect.contents
-        rects.append((r.left, r.top, r.right, r.bottom))
-        return True
-
-    user32.EnumDisplayMonitors(None, None, MONITORENUMPROC(cb), 0)
-    return rects
-
-
-def window_rect(hwnd):
-    r = wt.RECT()
-    # The frame bounds exclude Windows 10/11's invisible resize borders.
-    if dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, ctypes.byref(r), ctypes.sizeof(r)) != 0:
-        user32.GetWindowRect(hwnd, ctypes.byref(r))
-    return (r.left, r.top, r.right, r.bottom)
-
-
-def area(r):
-    return max(0, r[2] - r[0]) * max(0, r[3] - r[1])
-
-
-def intersect(a, b):
-    return (max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3]))
-
-
-def subtract(rects, cut):
-    """Remove `cut` from a list of rectangles, splitting them as needed."""
-    out = []
-    for r in rects:
-        i = intersect(r, cut)
-        if area(i) == 0:
-            out.append(r)
-            continue
-        left, top, right, bottom = r
-        if i[1] > top:
-            out.append((left, top, right, i[1]))
-        if i[3] < bottom:
-            out.append((left, i[3], right, bottom))
-        if i[0] > left:
-            out.append((left, i[1], i[0], i[3]))
-        if i[2] < right:
-            out.append((i[2], i[1], right, i[3]))
-    return out
-
-
-def candidate_windows():
-    """Top-level app windows that could be on screen, front to back."""
-    found = []
-
-    def cb(hwnd, _):
-        if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
-            return True
-        ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        if ex & (WS_EX_TOOLWINDOW | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE):
-            return True
-        cloaked = wt.DWORD()
-        # Cloaked = hidden by Windows: other virtual desktops, suspended Store apps.
-        if dwmapi.DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, ctypes.byref(cloaked), ctypes.sizeof(cloaked)) == 0 and cloaked.value:
-            return True
-        cls = ctypes.create_unicode_buffer(256)
-        user32.GetClassNameW(hwnd, cls, 256)
-        if cls.value in SHELL_CLASSES:
-            return True
-        rect = window_rect(hwnd)
-        if area(rect) > 0:
-            found.append((hwnd, rect))
-        return True
-
-    user32.EnumWindows(WNDENUMPROC(cb), 0)
-    return found
-
-
-def visible_exe_paths():
-    """Paths of every app with a window you can actually see, plus the focused app."""
-    paths = set()
-    fg = user32.GetForegroundWindow()
-    fg_path = window_exe_path(fg) if fg and window_pid(fg) not in OWN_PIDS else None
-    if fg_path and os.path.basename(fg_path).lower() in LOCK_EXES:
-        return set()  # lock screen / sign-in screen
-    if fg_path:
-        paths.add(fg_path)
-    uncovered = monitor_rects()
-    for hwnd, rect in candidate_windows():
-        if not uncovered:
-            break
-        shown = sum(area(intersect(r, rect)) for r in uncovered)
-        if shown >= MIN_VISIBLE_PIXELS and shown >= MIN_VISIBLE_FRACTION * area(rect) and window_pid(hwnd) not in OWN_PIDS:
-            path = window_exe_path(hwnd)
-            if path:
-                paths.add(path)
-        uncovered = subtract(uncovered, rect)
-    return paths
-
-
-def friendly_name(path):
-    """The 'File description' from the exe's version info, e.g. 'Visual Studio Code'."""
-    fallback = os.path.splitext(os.path.basename(path))[0]
-    try:
-        size = version.GetFileVersionInfoSizeW(path, None)
-        if not size:
-            return fallback
-        data = ctypes.create_string_buffer(size)
-        if not version.GetFileVersionInfoW(path, 0, size, data):
-            return fallback
-        ptr, length = ctypes.c_void_p(), wt.UINT()
-        langs = [(0x0409, 0x04B0), (0x0409, 0x04E4), (0x0000, 0x04B0)]
-        if version.VerQueryValueW(data, "\\VarFileInfo\\Translation", ctypes.byref(ptr), ctypes.byref(length)) and length.value >= 4:
-            pairs = ctypes.cast(ptr, ctypes.POINTER(wt.WORD))
-            langs.insert(0, (pairs[0], pairs[1]))
-        for lang, codepage in langs:
-            key = f"\\StringFileInfo\\{lang:04x}{codepage:04x}\\FileDescription"
-            if version.VerQueryValueW(data, key, ctypes.byref(ptr), ctypes.byref(length)) and length.value > 1:
-                text = ctypes.wstring_at(ptr, length.value - 1).strip()
-                if text:
-                    return text
-    except Exception:
-        pass
-    return fallback
-
-
 # ---------------------------------------------------------------- own resource usage
 
-class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
-    _fields_ = [("cb", wt.DWORD), ("PageFaultCount", wt.DWORD), ("PeakWorkingSetSize", ctypes.c_size_t),
-                ("WorkingSetSize", ctypes.c_size_t), ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaPagedPoolUsage", ctypes.c_size_t), ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
-                ("QuotaNonPagedPoolUsage", ctypes.c_size_t), ("PagefileUsage", ctypes.c_size_t),
-                ("PeakPagefileUsage", ctypes.c_size_t)]
-
-
-psapi = ctypes.WinDLL("psapi")
-kernel32.GetCurrentProcess.restype = wt.HANDLE
-psapi.GetProcessMemoryInfo.argtypes = [wt.HANDLE, ctypes.POINTER(PROCESS_MEMORY_COUNTERS), wt.DWORD]
-
-
 class SelfUsage:
-    """CPU and memory used by this background process (what Task Manager shows as AppTime)."""
+    """CPU and memory used by this background process (shown as AppTime in Task Manager / Activity Monitor)."""
 
     def __init__(self):
         self.last = (time.monotonic(), time.process_time())
@@ -340,9 +68,7 @@ class SelfUsage:
         if wall >= 2:  # average over at least a couple of seconds
             self.cpu_percent = max(0.0, (cpu - self.last[1]) / wall / (os.cpu_count() or 1) * 100)
             self.last = (now, cpu)
-        mem = PROCESS_MEMORY_COUNTERS(cb=ctypes.sizeof(PROCESS_MEMORY_COUNTERS))
-        psapi.GetProcessMemoryInfo(kernel32.GetCurrentProcess(), ctypes.byref(mem), mem.cb)
-        return {"cpu_percent": round(self.cpu_percent, 2), "memory_mb": round(mem.WorkingSetSize / 2**20, 1)}
+        return {"cpu_percent": round(self.cpu_percent, 2), "memory_mb": round(osx.memory_mb(), 1)}
 
 
 self_usage = SelfUsage()
@@ -360,7 +86,7 @@ def connect():
         CREATE TABLE IF NOT EXISTS usage (
             day TEXT NOT NULL,          -- YYYY-MM-DD, local time
             hour INTEGER NOT NULL,      -- 0-23
-            exe TEXT NOT NULL,          -- lowercase file name, e.g. code.exe
+            exe TEXT NOT NULL,          -- app key: code.exe (Windows), com.microsoft.vscode (macOS)
             seconds REAL NOT NULL,
             PRIMARY KEY (day, hour, exe)
         );
@@ -413,7 +139,7 @@ class Tracker:
         conn = connect()
         self.idle_minutes = get_setting(conn, "idle_minutes", DEFAULT_IDLE_MINUTES)
         self.known_apps = {r[0] for r in conn.execute("SELECT exe FROM apps")}
-        ignored = sorted(IGNORED_EXES - {""})
+        ignored = sorted(osx.IGNORED - {""})
         conn.execute(f"DELETE FROM usage WHERE exe IN ({','.join('?' * len(ignored))})", ignored)
         conn.commit()
         conn.close()
@@ -427,20 +153,19 @@ class Tracker:
             gap = now - last
             last = now
             exes = set()
-            if not self.paused and gap <= MAX_GAP_SECONDS and idle_seconds() < self.idle_minutes * 60:
+            if not self.paused and gap <= MAX_GAP_SECONDS and osx.idle_seconds() < self.idle_minutes * 60:
                 try:
-                    paths = visible_exe_paths()
+                    apps = osx.visible_apps()
                 except Exception:
-                    paths = set()
-                for path in paths:
-                    exe = os.path.basename(path).lower()
-                    if exe in IGNORED_EXES:
+                    apps = {}
+                for exe, path in apps.items():
+                    if exe in osx.IGNORED:
                         continue
                     exes.add(exe)
                     if exe not in self.known_apps:
                         conn.execute(
                             "INSERT OR IGNORE INTO apps (exe, name, path) VALUES (?, ?, ?)",
-                            (exe, friendly_name(path), path),
+                            (exe, osx.app_name(exe, path), path),
                         )
                         conn.commit()
                         self.known_apps.add(exe)
@@ -912,7 +637,7 @@ def own_command(*args):
     if getattr(sys, "frozen", False):
         return [sys.executable, *args]
     exe = sys.executable
-    pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+    pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")  # Windows: no console window
     return [pythonw if os.path.exists(pythonw) else exe, os.path.abspath(__file__), *args]
 
 
@@ -927,7 +652,7 @@ class DashboardWindow:
             return
         try:
             self.proc = subprocess.Popen(own_command("--window"))
-            OWN_PIDS.add(self.proc.pid)
+            osx.OWN_PIDS.add(self.proc.pid)
         except OSError:
             webbrowser.open(URL)
 
@@ -943,70 +668,6 @@ class DashboardWindow:
 window = DashboardWindow()
 
 
-def windows_dark_mode():
-    import winreg
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
-            return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
-    except OSError:
-        return False
-
-
-# Chromium options that keep the dashboard's web view small. The page is a
-# simple local dashboard, so it doesn't need GPU acceleration, extensions,
-# background services or spare processes.
-WEBVIEW_ARGS = os.environ.get("APPTIME_WEBVIEW_ARGS", " ".join([
-    "--disable-gpu",
-    "--in-process-gpu",
-    "--renderer-process-limit=1",
-    "--disable-extensions",
-    "--disable-background-networking",
-    "--disable-component-update",
-    "--disable-features=ElasticOverscroll,msSmartScreenProtection,SpareRendererForSitePerProcess,"
-    "AutofillServerCommunication",
-    "--js-flags=--lite-mode",  # simpler JavaScript engine: plenty for this page, less memory
-]))
-
-
-def lean_webview():
-    """Add WEBVIEW_ARGS to the options pywebview passes to WebView2.
-
-    pywebview builds the options and starts WebView2 inside one constructor,
-    with no setting for extra Chromium options. Right after it writes its own
-    options it reads settings["ALLOW_FILE_URLS"], so that read is where ours
-    are appended. (Local file URLs aren't needed: the dashboard is served over
-    http from AppTime itself.)
-    """
-    try:
-        from webview.platforms import edgechromium
-    except Exception:
-        return
-    real_props = edgechromium.CoreWebView2CreationProperties
-    created = []
-
-    def make_props():
-        props = real_props()
-        created.append(props)
-        return props
-
-    class Settings:
-        def __init__(self, inner):
-            self.inner = inner
-
-        def __getitem__(self, key):
-            if key == "ALLOW_FILE_URLS" and created:
-                props = created.pop()
-                props.AdditionalBrowserArguments = f"{props.AdditionalBrowserArguments} {WEBVIEW_ARGS}".strip()
-                return False
-            return self.inner[key]
-
-        def __getattr__(self, name):
-            return getattr(self.inner, name)
-
-    edgechromium.CoreWebView2CreationProperties = make_props
-    edgechromium.webview_settings = Settings(edgechromium.webview_settings)
-
-
 def run_window():
     """Entry point of the `--window` process: shows the dashboard until closed."""
     try:
@@ -1014,11 +675,11 @@ def run_window():
     except ImportError:
         webbrowser.open(URL)
         return
-    lean_webview()
+    osx.prepare_window()
 
     win = webview.create_window(
         APP_NAME, URL, width=1120, height=860, min_size=(400, 500),
-        background_color="#111110" if windows_dark_mode() else "#f4f4f2",
+        background_color="#111110" if osx.dark_mode() else "#f4f4f2",
     )
 
     closed = threading.Event()
@@ -1040,11 +701,10 @@ def run_window():
                     return
 
     try:
-        # Classic-bitmap .ico: .NET garbles PNG-compressed icon images.
-        icon = os.path.join(RESOURCE_DIR, "assets", "AppTime.ico")
-        webview.start(watch_focus, private_mode=True, icon=icon if os.path.exists(icon) else None)
+        icon = os.path.join(RESOURCE_DIR, "assets", osx.WINDOW_ICON) if osx.WINDOW_ICON else None
+        webview.start(watch_focus, private_mode=True, icon=icon if icon and os.path.exists(icon) else None)
     except Exception:
-        webbrowser.open(URL)  # e.g. the WebView2 runtime is missing
+        webbrowser.open(URL)  # e.g. Windows without the WebView2 runtime
     # Window closed: end this process right away so all its memory is freed,
     # even if a helper thread is still finishing.
     os._exit(0)
@@ -1059,41 +719,6 @@ def main_is_running():
 
 
 # ---------------------------------------------------------------- startup / tray
-
-RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-
-
-def launch_command():
-    if getattr(sys, "frozen", False):
-        return f'"{sys.executable}"'
-    exe = sys.executable
-    pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")
-    if os.path.exists(pythonw):
-        exe = pythonw
-    return f'"{exe}" "{os.path.abspath(__file__)}"'
-
-
-def starts_with_windows():
-    import winreg
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
-            winreg.QueryValueEx(key, APP_NAME)
-            return True
-    except OSError:
-        return False
-
-
-def set_start_with_windows(enabled):
-    import winreg
-    with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
-        if enabled:
-            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, launch_command())
-        else:
-            try:
-                winreg.DeleteValue(key, APP_NAME)
-            except OSError:
-                pass
-
 
 def tray_image():
     from PIL import Image, ImageDraw
@@ -1119,7 +744,7 @@ def run_tray(tracker, server):
         tracker.paused = not tracker.paused
 
     def toggle_startup(icon, item):
-        set_start_with_windows(not starts_with_windows())
+        osx.set_startup(not osx.startup_enabled(), own_command())
 
     def quit_app(icon, item):
         icon.stop()
@@ -1127,14 +752,32 @@ def run_tray(tracker, server):
     menu = pystray.Menu(
         pystray.MenuItem("Open dashboard", open_dashboard, default=True),
         pystray.MenuItem("Pause tracking", toggle_pause, checked=lambda item: tracker.paused),
-        pystray.MenuItem("Start with Windows", toggle_startup, checked=lambda item: starts_with_windows()),
+        pystray.MenuItem(osx.STARTUP_LABEL, toggle_startup, checked=lambda item: osx.startup_enabled()),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", quit_app),
     )
     pystray.Icon(APP_NAME, tray_image(), APP_NAME, menu).run()
 
 
+def selftest():
+    """Check that tracking works on this computer, print what it sees, and exit.
+    Used by the release build on GitHub's Windows and Mac machines."""
+    print(f"{APP_NAME} {APP_VERSION} on {sys.platform}")
+    print("idle seconds:", round(osx.idle_seconds(), 1))
+    apps = osx.visible_apps()
+    print("apps on screen:", {k: osx.app_name(k, p) for k, p in apps.items()})
+    print("memory MB:", round(osx.memory_mb(), 1), "| dark mode:", osx.dark_mode())
+    print("starts at login:", osx.startup_enabled(), "| sharing available:", sharing_available())
+    for name in ("dashboard.html", "assets/logo.png", "assets/tray.png"):
+        assert os.path.exists(os.path.join(RESOURCE_DIR, name)), f"missing {name}"
+    import pystray  # noqa: F401  (the tray library loads)
+    import webview  # noqa: F401  (the window library loads)
+    print("selftest OK")
+
+
 def main():
+    if "--selftest" in sys.argv:
+        return selftest()
     if "--window" in sys.argv:
         return run_window()
     try:

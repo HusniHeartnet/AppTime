@@ -45,7 +45,9 @@ HIVEMIND_TOP_N = 5
 HIVEMIND_MAX_USERS = 1500  # pairwise comparison cost grows with users squared
 
 ID_RE = re.compile(r"^[0-9a-f]{32}$")
-EXE_RE = re.compile(r"^[a-z0-9 ._+()&'-]{1,80}\.exe$")
+# App keys: "chrome.exe" (Windows), "com.google.chrome" (macOS bundle id), or
+# "some app.app" (macOS app without a bundle id).
+EXE_RE = re.compile(r"^(?:[a-z0-9 ._+()&'-]{1,80}\.(?:exe|app)|[a-z0-9-]+(?:\.[a-z0-9-]+){1,8})$")
 DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # Windows' own tools and interface aren't counted (AppTime 1.3+ doesn't send
@@ -56,6 +58,12 @@ SYSTEM_EXES = {
     "dllhost.exe", "searchhost.exe", "searchapp.exe", "searchui.exe", "startmenuexperiencehost.exe",
     "shellexperiencehost.exe", "shellhost.exe", "textinputhost.exe", "screenclippinghost.exe",
     "applicationframehost.exe", "lockapp.exe", "logonui.exe",
+    # macOS
+    "com.husniheartnet.apptime", "com.apple.finder", "com.apple.activitymonitor", "com.apple.systempreferences",
+    "com.apple.systemsettings", "com.apple.dock", "com.apple.controlcenter", "com.apple.notificationcenterui",
+    "com.apple.spotlight", "com.apple.systemuiserver", "com.apple.windowmanager", "com.apple.screencaptureui",
+    "com.apple.screensaver.engine", "com.apple.loginwindow", "com.apple.securityagent",
+    "com.apple.coreservices.uiagent", "com.apple.universalaccessauthwarn",
 }
 
 db_lock = threading.Lock()
@@ -166,11 +174,14 @@ def community_stats(conn, rng):
     ).fetchone()
     people = people or 0
 
+    # Apps are grouped by name, so e.g. Google Chrome on Windows (chrome.exe)
+    # and on Mac (com.google.chrome) count as one app.
     rows = conn.execute(
-        f"""SELECT exe, COUNT(DISTINCT install) AS users, SUM(seconds) AS secs,
-                   (SELECT name FROM app_days n WHERE n.exe = a.exe GROUP BY name ORDER BY COUNT(*) DESC LIMIT 1)
+        f"""SELECT MIN(exe), COUNT(DISTINCT install) AS users, SUM(seconds) AS secs,
+                   (SELECT name FROM app_days n WHERE lower(n.name) = lower(a.name)
+                    GROUP BY name ORDER BY COUNT(*) DESC LIMIT 1)
             FROM app_days a WHERE {where}
-            GROUP BY exe HAVING users >= ?""",
+            GROUP BY lower(name) HAVING users >= ?""",
         args + [MIN_USERS_PER_APP],
     ).fetchall()
     apps = [
@@ -186,10 +197,10 @@ def community_stats(conn, rng):
     ]
     # Average time per person per day they used it.
     used_days = dict(
-        conn.execute(f"SELECT exe, COUNT(*) FROM app_days WHERE {where} GROUP BY exe", args).fetchall()
+        conn.execute(f"SELECT lower(name), COUNT(*) FROM app_days WHERE {where} GROUP BY lower(name)", args).fetchall()
     )
     for a in apps:
-        a["hours_per_user_day"] = a["hours"] / used_days.get(a["exe"], 1)
+        a["hours_per_user_day"] = a["hours"] / used_days.get(a["name"].lower(), 1)
 
     most_people = sorted(apps, key=lambda a: (-a["users"], -a["hours"]))[:15]
     most_hours = sorted(apps, key=lambda a: -a["hours"])[:15]
@@ -198,7 +209,7 @@ def community_stats(conn, rng):
     # similarity of each pair of people's top-5 apps, as a 0-100 score).
     tops = {}
     for install, exe, secs in conn.execute(
-        f"SELECT install, exe, SUM(seconds) FROM app_days WHERE {where} GROUP BY install, exe", args
+        f"SELECT install, lower(name), SUM(seconds) FROM app_days WHERE {where} GROUP BY install, lower(name)", args
     ):
         tops.setdefault(install, []).append((secs, exe))
     sets = [frozenset(e for _, e in sorted(v, reverse=True)[:HIVEMIND_TOP_N]) for v in tops.values()]

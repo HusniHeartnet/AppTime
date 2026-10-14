@@ -1,20 +1,22 @@
-# Builds AppTime.exe and attaches it to a GitHub Release.
-# Trigger: push a version tag, e.g.  git tag v1.2.0 && git push origin v1.2.0
+# Builds AppTime for Windows and macOS and attaches both to a GitHub Release.
+#
+# Release: push a version tag, e.g.  git tag v1.3.0 && git push origin v1.3.0
+# Test build only (no release): run this workflow by hand from the Actions tab.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -27,12 +29,79 @@ jobs:
             exit 1
           fi
 
-      - name: Build
-        run: |
-          pip install pyinstaller==6.11.1 -r requirements.txt
-          pyinstaller --onefile --noconsole --name AppTime --icon assets/AppTime.ico --version-file version_info.txt --add-data "dashboard.html;." --add-data "server_cert.pem;." --add-data "assets;assets" apptime.py
+      - name: Install
+        run: pip install pyinstaller==6.11.1 -r requirements.txt
 
+      - name: Self-test (source)
+        run: python apptime.py --selftest
+
+      - name: Build
+        run: >
+          pyinstaller --onefile --noconsole --name AppTime
+          --icon assets/AppTime.ico --version-file version_info.txt
+          --hidden-import pystray._win32
+          --add-data "dashboard.html;." --add-data "server_cert.pem;." --add-data "assets;assets"
+          apptime.py
+
+      - name: Self-test (built app)
+        shell: pwsh
+        run: |
+          $p = Start-Process dist/AppTime.exe -ArgumentList "--selftest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "AppTime.exe --selftest failed with exit code $($p.ExitCode)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/AppTime.exe
+
+  macos:
+    runs-on: macos-latest  # Apple Silicon (M1 and newer)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install pyinstaller==6.11.1 -r requirements.txt
+
+      - name: Self-test (source)
+        run: python apptime.py --selftest
+
+      - name: Build
+        run: >
+          pyinstaller --windowed --name AppTime
+          --icon assets/AppTime.icns --osx-bundle-identifier com.husniheartnet.apptime
+          --hidden-import pystray._darwin
+          --add-data "dashboard.html:." --add-data "server_cert.pem:." --add-data "assets:assets"
+          apptime.py
+
+      - name: Make it a menu bar app and sign it (ad hoc)
+        run: |
+          plutil -insert LSUIElement -bool YES dist/AppTime.app/Contents/Info.plist
+          plutil -replace CFBundleShortVersionString -string "${GITHUB_REF_NAME#v}" dist/AppTime.app/Contents/Info.plist || true
+          codesign --force --deep --sign - dist/AppTime.app
+
+      - name: Self-test (built app)
+        run: dist/AppTime.app/Contents/MacOS/AppTime --selftest
+
+      - name: Zip
+        run: ditto -c -k --keepParent dist/AppTime.app AppTime-mac.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: AppTime-mac.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/AppTime.exe
+          files: |
+            windows/AppTime.exe
+            macos/AppTime-mac.zip
           generate_release_notes: true
