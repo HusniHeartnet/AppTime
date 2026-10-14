@@ -27,13 +27,15 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import updater
+
 if sys.platform == "darwin":
     import platform_mac as osx
 else:
     import platform_win as osx
 
 APP_NAME = "AppTime"
-APP_VERSION = "1.5.0"
+APP_VERSION = "1.6.0"
 
 # Community sharing (see server/README.md). Sharing is only offered when the
 # URL is set AND server_cert.pem (the server's own certificate) is present;
@@ -42,7 +44,7 @@ COMMUNITY_URL = "https://139.190.100.30:8443"
 PRIVACY_URL = "https://github.com/HusniHeartnet/AppTime/blob/main/PRIVACY.md"
 COMMUNITY_LINK = ""  # optional: where results are posted, e.g. a Discord invite
 UPLOAD_CHECK_SECONDS = 15 * 60
-PORT = 47820
+PORT = int(os.environ.get("APPTIME_PORT", "47820"))
 URL = f"http://127.0.0.1:{PORT}/"
 POLL_SECONDS = 1.0
 FLUSH_SECONDS = 30
@@ -613,6 +615,8 @@ def make_handler(tracker):
                 ctype = "image/png" if name.endswith(".png") else "image/x-icon"
                 with open(os.path.join(RESOURCE_DIR, "assets", name), "rb") as f:
                     return self.send(200, f.read(), ctype)
+            if url.path == "/api/update":
+                return self.send(200, app_updater.state())
             if url.path == "/api/window-ping":
                 # The dashboard window asks whether it should come to the front.
                 return self.send(200, {"focus": window.take_focus_request()})
@@ -651,6 +655,16 @@ def make_handler(tracker):
             url = urlparse(self.path)
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}")
+            if url.path == "/api/update":
+                if body.get("action") == "check":
+                    app_updater.check_quietly()
+                elif body.get("action") == "install":
+                    if app_updater.can_install():
+                        app_updater.start_install()
+                    else:
+                        webbrowser.open(app_updater.notes_url)  # e.g. running from source: download by hand
+                        return self.send(200, {**app_updater.state(), "manual": True})
+                return self.send(200, app_updater.state())
             if url.path == "/api/open-window":
                 window.open()
                 return self.send(200, {"ok": True})
@@ -833,6 +847,30 @@ def main_is_running():
 
 # ---------------------------------------------------------------- startup / tray
 
+# Things an update needs to shut down: the tracker and the tray icon.
+running = {}
+
+
+def restart_into(command):
+    """Start the freshly installed version and end this one."""
+    tracker = running.get("tracker")
+    window.close()
+    if tracker:
+        tracker.stop_event.set()
+        tracker.flush()
+    # A fully independent new copy: without this, PyInstaller would make it
+    # reuse this copy's unpacked files, which are deleted when this copy exits.
+    subprocess.Popen(command, env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"})
+    try:
+        running["tray"].stop()
+    except Exception:
+        pass
+    os._exit(0)
+
+
+app_updater = updater.Updater(APP_VERSION, f"{APP_NAME}/{APP_VERSION}", restart_into)
+
+
 def set_startup(enabled):
     osx.set_startup(enabled, own_command())
     conn = connect()
@@ -894,7 +932,9 @@ def run_tray(tracker, server):
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Quit", quit_app),
     )
-    pystray.Icon(APP_NAME, tray_image(), APP_NAME, menu).run()
+    icon = pystray.Icon(APP_NAME, tray_image(), APP_NAME, menu)
+    running["tray"] = icon
+    icon.run()
 
 
 def selftest():
@@ -908,6 +948,11 @@ def selftest():
     print("starts at login:", osx.startup_enabled(), "| sharing available:", sharing_available())
     for name in ("dashboard.html", "assets/logo.png", "assets/tray.png"):
         assert os.path.exists(os.path.join(RESOURCE_DIR, name)), f"missing {name}"
+    try:
+        app_updater.check()
+        print("latest release:", app_updater.latest, "| update file found:", bool(app_updater.asset))
+    except Exception as e:
+        print("update check failed (network?):", e)
     import pystray  # noqa: F401  (the tray library loads)
     import webview  # noqa: F401  (the window library loads)
     print("selftest OK")
@@ -918,9 +963,16 @@ def main():
         return selftest()
     if "--window" in sys.argv:
         return run_window()
-    try:
-        server = ThreadingHTTPServer(("127.0.0.1", PORT), None)
-    except OSError:
+    after_update = "--after-update" in sys.argv
+    server = None
+    for _ in range(60 if after_update else 1):
+        try:
+            server = ThreadingHTTPServer(("127.0.0.1", PORT), None)
+            break
+        except OSError:
+            if after_update:
+                time.sleep(0.5)  # the previous version is still closing
+    if server is None:
         # Already running: ask that copy to show its dashboard.
         try:
             req = urllib.request.Request(URL + "api/open-window", data=b"{}", method="POST")
@@ -930,7 +982,12 @@ def main():
         return
 
     tracker = Tracker()
+    running["tracker"] = tracker
     ensure_startup()
+    threading.Thread(target=app_updater.loop, args=(tracker.stop_event,), daemon=True).start()
+    threading.Timer(15, updater.remove_old_copy).start()  # previous version, if we were just updated
+    if after_update:
+        window.open()
     server.RequestHandlerClass = make_handler(tracker)
     threading.Thread(target=tracker.run, daemon=True).start()
     threading.Thread(target=server.serve_forever, daemon=True).start()

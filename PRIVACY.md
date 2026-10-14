@@ -1,6 +1,6 @@
 # AppTime privacy policy
 
-Last updated: 14 October 2026
+Last updated: 14 October 2026 (update checks added)
 
 ## The short version
 
@@ -36,6 +36,13 @@ you can hide any app from sharing.
 Our server sees your IP address, as with any internet connection. It is only used to
 limit abuse (too many uploads in an hour). It is kept in memory for at most an hour,
 and is never stored or logged.
+
+## Update checks
+
+Separately from sharing, AppTime asks GitHub (where it's published) whether a newer version
+exists, when it starts and about twice a day. That request contains no data about you or your
+screen time. Like any website, GitHub sees your IP address. See
+[GitHub's privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
 
 ## Why, and what we publish
 

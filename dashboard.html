@@ -75,6 +75,12 @@
   .nav .label { min-width: 190px; text-align: center; font-weight: 600; }
   .nav button.arrow { width: 34px; padding: 6px 0; }
 
+  .update-bar {
+    display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px;
+    background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 14px; margin-bottom: 16px;
+  }
+  .update-bar.on { display: flex; }
+  .update-bar .actions { display: flex; gap: 12px; align-items: center; margin: 0; }
   .filter { display: none; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 14px; color: var(--text-2); }
   .filter.on { display: flex; }
   .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-soft); color: var(--text); border-radius: 999px; padding: 3px 4px 3px 12px; font-weight: 600; }
@@ -184,6 +190,14 @@
     </div>
   </header>
 
+  <div class="update-bar" id="update-bar" role="status">
+    <span id="update-text"></span>
+    <span class="actions">
+      <button type="button" class="link" id="update-notes">What's new</button>
+      <button type="button" class="primary" id="update-btn">Update now</button>
+    </span>
+  </div>
+
   <div class="controls">
     <div class="tabs" role="group" aria-label="Time range">
       <button type="button" data-range="day">Day</button>
@@ -240,6 +254,7 @@
     <span id="backup" hidden>Backup: <button type="button" class="link" id="export-btn">Export…</button>
       · <button type="button" class="link" id="import-btn">Import…</button></span>
     <span id="privacy-line">All data stays on this computer.</span>
+    <span><span id="version"></span> · <button type="button" class="link" id="check-updates">Check for updates</button></span>
     <span id="usage" title="CPU and memory used by AppTime's background tracker (shown as AppTime in Task Manager)"></span>
     <button type="button" class="link" id="share-link">Community sharing: off</button>
   </footer>
@@ -695,8 +710,56 @@ $("share-delete").addEventListener("click", async () => {
   await loadShare();
 });
 
+// ---------------------------------------------------------------- updates
+let update = null;
+let updatePoll = null;
+
+function renderUpdate() {
+  if (!update) return;
+  $("version").textContent = `AppTime ${update.current}`;
+  const bar = $("update-bar"), btn = $("update-btn");
+  const busy = update.status === "downloading" || update.status === "installing";
+  bar.classList.toggle("on", update.available || busy || update.status === "error");
+  btn.disabled = busy;
+  if (update.status === "downloading") {
+    $("update-text").textContent = `Downloading AppTime ${update.latest}… ${Math.round(update.progress * 100)}%`;
+  } else if (update.status === "installing") {
+    $("update-text").textContent = "Installing… AppTime will restart in a moment.";
+  } else if (update.status === "error") {
+    $("update-text").textContent = `${update.message} You can download it by hand from the release page.`;
+    btn.textContent = "Try again";
+  } else {
+    $("update-text").textContent = `AppTime ${update.latest} is available (you have ${update.current}).`;
+    btn.textContent = update.can_install ? "Update now" : "Download";
+  }
+  if (busy && !updatePoll) updatePoll = setInterval(loadUpdate, 700);
+  if (!busy && updatePoll) { clearInterval(updatePoll); updatePoll = null; }
+}
+
+async function loadUpdate() {
+  try { update = await (await fetch("/api/update")).json(); renderUpdate(); } catch (e) { /* restarting */ }
+}
+
+async function postUpdate(action) {
+  const res = await fetch("/api/update", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) });
+  update = await res.json();
+  renderUpdate();
+  return update;
+}
+
+$("update-btn").addEventListener("click", () => postUpdate("install"));
+$("update-notes").addEventListener("click", () => window.open(update.notes_url, "_blank"));
+$("check-updates").addEventListener("click", async () => {
+  $("check-updates").textContent = "Checking…";
+  const u = await postUpdate("check");
+  $("check-updates").textContent = u.available ? "Update available ↑" : (u.latest ? "You're up to date" : "Couldn't check");
+  setTimeout(() => { $("check-updates").textContent = "Check for updates"; }, 4000);
+});
+setInterval(loadUpdate, 10 * 60 * 1000);
+
 load();
 loadShare();
+loadUpdate();
 </script>
 </body>
 </html>

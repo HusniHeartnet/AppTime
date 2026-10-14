@@ -51,6 +51,13 @@ AppTime runs quietly in the background. Measured on a normal Windows 11 laptop:
 You'll find it as **AppTime** in Task Manager (or Activity Monitor on Mac), and the bottom of the dashboard
 shows its current CPU and memory use.
 
+## Updating
+
+AppTime checks for new versions by itself. When one is out, a bar appears at the top of the
+dashboard: click **Update now** and AppTime downloads it, checks it's exactly the published file,
+installs it and restarts. Your data and settings stay as they are. You can also click
+**Check for updates** at the bottom of the dashboard.
+
 ## Your data
 
 Everything is stored on your computer: `%LOCALAPPDATA%\AppTime\apptime.db` on Windows,
@@ -98,8 +105,8 @@ Push a version tag and GitHub Actions builds the Windows and Mac apps, self-test
 and attaches them to a release:
 
 ```
-git tag v1.5.0
-git push origin v1.5.0
+git tag v1.6.0
+git push origin v1.6.0
 ```
 
 The community server lives in [`server/`](server/README.md).
