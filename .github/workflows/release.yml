@@ -49,10 +49,42 @@ jobs:
           $p = Start-Process dist/AppTime.exe -ArgumentList "--selftest" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "AppTime.exe --selftest failed with exit code $($p.ExitCode)" }
 
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $version = python -c "import apptime; print(apptime.APP_VERSION)"
+          & $iscc "/DMyVersion=$version" installer\AppTime.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+
+      - name: Test installer (install, check, uninstall)
+        shell: pwsh
+        run: |
+          $app = "$env:LOCALAPPDATA\Programs\AppTime"
+          $shortcut = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\AppTime.lnk"
+          $uninstallKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F3A2C4E-9B1D-4E7A-A5C2-3D8E1F0B7A94}_is1"
+          $p = Start-Process dist\AppTime-Setup.exe -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Setup failed with exit code $($p.ExitCode)" }
+          foreach ($path in "$app\AppTime.exe", "$app\unins000.exe", $shortcut, $uninstallKey) {
+            if (-not (Test-Path $path)) { throw "Missing after install: $path" }
+          }
+          "Installed: " + (Get-ItemProperty $uninstallKey).DisplayName + " " + (Get-ItemProperty $uninstallKey).DisplayVersion
+          $t = Start-Process "$app\AppTime.exe" -ArgumentList "--selftest" -Wait -PassThru
+          if ($t.ExitCode -ne 0) { throw "Installed AppTime failed its self-test" }
+          $u = Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
+          Start-Sleep -Seconds 5
+          foreach ($path in "$app\AppTime.exe", $shortcut, $uninstallKey) {
+            if (Test-Path $path) { throw "Still there after uninstall: $path" }
+          }
+          "Install and uninstall OK"
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: dist/AppTime.exe
+          path: |
+            dist/AppTime.exe
+            dist/AppTime-Setup.exe
 
   macos:
     runs-on: macos-latest  # Apple Silicon (M1 and newer)
@@ -79,19 +111,35 @@ jobs:
       - name: Make it a menu bar app and sign it (ad hoc)
         run: |
           plutil -insert LSUIElement -bool YES dist/AppTime.app/Contents/Info.plist
-          plutil -replace CFBundleShortVersionString -string "${GITHUB_REF_NAME#v}" dist/AppTime.app/Contents/Info.plist || true
+          VERSION=$(python -c "import apptime; print(apptime.APP_VERSION)")
+          plutil -replace CFBundleShortVersionString -string "$VERSION" dist/AppTime.app/Contents/Info.plist
+          plutil -replace CFBundleVersion -string "$VERSION" dist/AppTime.app/Contents/Info.plist
           codesign --force --deep --sign - dist/AppTime.app
 
       - name: Self-test (built app)
         run: dist/AppTime.app/Contents/MacOS/AppTime --selftest
 
-      - name: Zip
+      - name: Zip (used by in-app updates)
         run: ditto -c -k --keepParent dist/AppTime.app AppTime-mac.zip
+
+      - name: Disk image (what people download)
+        run: |
+          mkdir dmg
+          cp -R dist/AppTime.app dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname AppTime -srcfolder dmg -ov -format UDZO AppTime.dmg
+          hdiutil attach -nobrowse -mountpoint /tmp/apptime-dmg AppTime.dmg
+          test -x /tmp/apptime-dmg/AppTime.app/Contents/MacOS/AppTime
+          test -L /tmp/apptime-dmg/Applications
+          hdiutil detach /tmp/apptime-dmg
+          echo "Disk image OK"
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: AppTime-mac.zip
+          path: |
+            AppTime-mac.zip
+            AppTime.dmg
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -102,6 +150,8 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: |
+            windows/AppTime-Setup.exe
             windows/AppTime.exe
+            macos/AppTime.dmg
             macos/AppTime-mac.zip
           generate_release_notes: true

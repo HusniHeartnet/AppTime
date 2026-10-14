@@ -10,21 +10,22 @@ and lifetime. What you make of the numbers is up to you.
 
 From the [latest release](https://github.com/HusniHeartnet/AppTime/releases/latest):
 
-**Windows:** download **AppTime.exe** and run it. No installation needed.
-Windows may show "Windows protected your PC" because the app isn't code-signed.
-Click **More info → Run anyway**. Tip: move it out of Downloads first, e.g. into a folder in Documents.
+**Windows:** download **AppTime-Setup.exe** and run it. It installs AppTime for your user
+account (no admin password needed), adds it to the Start menu, and starts it. Windows may show
+"Windows protected your PC" because the app isn't code-signed: click **More info → Run anyway**.
 The AppTime cat appears in the system tray: click it to open your dashboard, right-click it to
 pause tracking or quit. AppTime starts automatically when you sign in; you can turn that off
-in the tray menu or at the bottom of the dashboard.
+in the tray menu or at the bottom of the dashboard. To uninstall, use **Settings → Apps**.
+(Prefer no installer? **AppTime.exe** is a portable version that runs from any folder.)
 
-**Mac** (Apple Silicon, M1 or newer): download **AppTime-mac.zip**, open it, and drag
-**AppTime** into your Applications folder. The first time you open it, macOS will say it
-can't check the app for malicious software, because it isn't notarized by Apple. Click
-**Done**, then open **System Settings → Privacy & Security**, scroll down and click
-**Open Anyway**. The AppTime cat appears in the menu bar at the top of the screen. Click it
-for the dashboard, pausing, or quitting. It opens automatically when you log in; you can turn
-that off with **Open at Login** in the menu. AppTime needs no special
-permissions on Mac.
+**Mac** (Apple Silicon, M1 or newer): download **AppTime.dmg**, open it, and drag **AppTime**
+into **Applications**. The first time you open it, macOS will say it can't check the app for
+malicious software, because it isn't notarized by Apple. Click **Done**, then open
+**System Settings → Privacy & Security**, scroll down and click **Open Anyway**. The AppTime cat
+appears in the menu bar at the top of the screen. Click it for the dashboard, pausing, or
+quitting. It opens automatically when you log in; you can turn that off with **Open at Login**
+in the menu. AppTime needs no special permissions on Mac. To uninstall, quit it and drag it
+from Applications to the Trash.
 
 ## How it counts
 
@@ -101,12 +102,12 @@ Use `--no-tray` to run it in a console, or `--selftest` to check tracking works 
 
 ## Making a release
 
-Push a version tag and GitHub Actions builds the Windows and Mac apps, self-tests both,
-and attaches them to a release:
+Push a version tag and GitHub Actions builds the Windows installer and portable app and the
+Mac disk image, tests them (including a full install and uninstall), and attaches them to a release:
 
 ```
-git tag v1.6.0
-git push origin v1.6.0
+git tag v1.7.0
+git push origin v1.7.0
 ```
 
 The community server lives in [`server/`](server/README.md).

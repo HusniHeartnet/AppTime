@@ -35,7 +35,7 @@ else:
     import platform_win as osx
 
 APP_NAME = "AppTime"
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.7.0"
 
 # Community sharing (see server/README.md). Sharing is only offered when the
 # URL is set AND server_cert.pem (the server's own certificate) is present;
@@ -665,6 +665,9 @@ def make_handler(tracker):
                         webbrowser.open(app_updater.notes_url)  # e.g. running from source: download by hand
                         return self.send(200, {**app_updater.state(), "manual": True})
                 return self.send(200, app_updater.state())
+            if url.path == "/api/quit":
+                threading.Timer(0.3, quit_now).start()  # answer first, then quit
+                return self.send(200, {"ok": True})
             if url.path == "/api/open-window":
                 window.open()
                 return self.send(200, {"ok": True})
@@ -851,21 +854,32 @@ def main_is_running():
 running = {}
 
 
-def restart_into(command):
-    """Start the freshly installed version and end this one."""
+def save_and_stop():
+    """Close the dashboard and save the latest tracked time."""
     tracker = running.get("tracker")
     window.close()
     if tracker:
         tracker.stop_event.set()
         tracker.flush()
-    # A fully independent new copy: without this, PyInstaller would make it
-    # reuse this copy's unpacked files, which are deleted when this copy exits.
-    subprocess.Popen(command, env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"})
+
+
+def quit_now():
+    """End AppTime cleanly (used by the installer and uninstaller)."""
+    save_and_stop()
     try:
         running["tray"].stop()
     except Exception:
         pass
     os._exit(0)
+
+
+def restart_into(command):
+    """Start the freshly installed version and end this one."""
+    save_and_stop()
+    # A fully independent new copy: without this, PyInstaller would make it
+    # reuse this copy's unpacked files, which are deleted when this copy exits.
+    subprocess.Popen(command, env={**os.environ, "PYINSTALLER_RESET_ENVIRONMENT": "1"})
+    quit_now()
 
 
 app_updater = updater.Updater(APP_VERSION, f"{APP_NAME}/{APP_VERSION}", restart_into)
@@ -1009,6 +1023,8 @@ def main():
 
     tracker = Tracker()
     running["tracker"] = tracker
+    if getattr(sys, "frozen", False):
+        osx.record_installed_version(APP_VERSION, sys.executable)
     ensure_startup()
     threading.Thread(target=app_updater.loop, args=(tracker.stop_event,), daemon=True).start()
     threading.Timer(15, updater.remove_old_copy).start()  # previous version, if we were just updated

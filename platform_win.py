@@ -368,3 +368,22 @@ def set_startup(enabled, command):
                 winreg.DeleteValue(key, APP_NAME)
             except OSError:
                 pass
+
+
+# ---------------------------------------------------------------- installed copy
+
+# Must match AppId in installer/AppTime.iss.
+UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F3A2C4E-9B1D-4E7A-A5C2-3D8E1F0B7A94}_is1"
+
+
+def record_installed_version(version, exe):
+    """After an in-app update, keep the version shown in Settings -> Apps right."""
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, UNINSTALL_KEY, 0,
+                            winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE) as key:
+            location = winreg.QueryValueEx(key, "InstallLocation")[0]
+            if os.path.normcase(os.path.abspath(location.rstrip("\\"))) == os.path.normcase(os.path.dirname(exe)):
+                winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, version)
+    except OSError:
+        pass  # not installed with the installer (portable copy)

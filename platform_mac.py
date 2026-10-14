@@ -172,3 +172,7 @@ def set_startup(enabled, command):
             }, f)
     elif os.path.exists(AGENT_PATH):
         os.remove(AGENT_PATH)
+
+
+def record_installed_version(version, exe):
+    pass  # macOS reads the version from the app bundle itself
