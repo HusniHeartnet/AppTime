@@ -952,6 +952,61 @@ def windows_dark_mode():
         return False
 
 
+# Chromium options that keep the dashboard's web view small. The page is a
+# simple local dashboard, so it doesn't need GPU acceleration, extensions,
+# background services or spare processes.
+WEBVIEW_ARGS = os.environ.get("APPTIME_WEBVIEW_ARGS", " ".join([
+    "--disable-gpu",
+    "--in-process-gpu",
+    "--renderer-process-limit=1",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--disable-features=ElasticOverscroll,msSmartScreenProtection,SpareRendererForSitePerProcess,"
+    "AutofillServerCommunication",
+    "--js-flags=--lite-mode",  # simpler JavaScript engine: plenty for this page, less memory
+]))
+
+
+def lean_webview():
+    """Add WEBVIEW_ARGS to the options pywebview passes to WebView2.
+
+    pywebview builds the options and starts WebView2 inside one constructor,
+    with no setting for extra Chromium options. Right after it writes its own
+    options it reads settings["ALLOW_FILE_URLS"], so that read is where ours
+    are appended. (Local file URLs aren't needed: the dashboard is served over
+    http from AppTime itself.)
+    """
+    try:
+        from webview.platforms import edgechromium
+    except Exception:
+        return
+    real_props = edgechromium.CoreWebView2CreationProperties
+    created = []
+
+    def make_props():
+        props = real_props()
+        created.append(props)
+        return props
+
+    class Settings:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __getitem__(self, key):
+            if key == "ALLOW_FILE_URLS" and created:
+                props = created.pop()
+                props.AdditionalBrowserArguments = f"{props.AdditionalBrowserArguments} {WEBVIEW_ARGS}".strip()
+                return False
+            return self.inner[key]
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+    edgechromium.CoreWebView2CreationProperties = make_props
+    edgechromium.webview_settings = Settings(edgechromium.webview_settings)
+
+
 def run_window():
     """Entry point of the `--window` process: shows the dashboard until closed."""
     try:
@@ -959,6 +1014,7 @@ def run_window():
     except ImportError:
         webbrowser.open(URL)
         return
+    lean_webview()
 
     win = webview.create_window(
         APP_NAME, URL, width=1120, height=860, min_size=(400, 500),

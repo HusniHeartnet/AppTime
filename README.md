@@ -34,9 +34,9 @@ pause tracking, turn on **Start with Windows**, or quit.
 
 AppTime runs quietly in the background. Measured on a normal Windows 11 laptop:
 
-- **Background tracker:** about 0.02% CPU and around 60 MB of memory.
-- **Dashboard window:** uses more while it's open (it's a small web view), and
-  frees all of it the moment you close the window.
+- **Background tracker:** about 0.02% CPU and about 30 MB of memory.
+- **Dashboard window:** about 110 MB more while it's open (a trimmed-down web view),
+  all of it freed the moment you close the window.
 
 You'll find it as **AppTime** in Task Manager, and the bottom of the dashboard
 shows its current CPU and memory use.
