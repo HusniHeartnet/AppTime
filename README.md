@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="160" alt="AppTime logo"></p>
+
 # AppTime
 
 Screen time for your Windows PC, like the one on your phone. AppTime records how
@@ -12,7 +14,7 @@ and run it. No installation and no Python needed.
 Windows may show "Windows protected your PC" because the app isn't code-signed.
 Click **More info → Run anyway**.
 
-A clock icon appears in the system tray. Click it to open your dashboard. Right-click it to
+The AppTime cat appears in the system tray. Click it to open your dashboard in its own window. Right-click it to
 pause tracking, turn on **Start with Windows**, or quit.
 
 ## How it counts
@@ -25,6 +27,17 @@ pause tracking, turn on **Start with Windows**, or quit.
 - With no keyboard or mouse input for 5 minutes (changeable at the bottom of the dashboard),
   it stops counting until you're back. Sleep and the lock screen aren't counted.
 - Counting starts when you first run it.
+
+## Light on your PC
+
+AppTime runs quietly in the background. Measured on a normal Windows 11 laptop:
+
+- **Background tracker:** about 0.02% CPU and around 60 MB of memory.
+- **Dashboard window:** uses more while it's open (it's a small web view), and
+  frees all of it the moment you close the window.
+
+You'll find it as **AppTime** in Task Manager, and the bottom of the dashboard
+shows its current CPU and memory use.
 
 ## Your data
 

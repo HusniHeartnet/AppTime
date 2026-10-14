@@ -17,6 +17,7 @@ import datetime as dt
 import json
 import os
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -25,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 APP_NAME = "AppTime"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 
 # Community sharing (see server/README.md). Sharing is only offered when the
 # URL is set AND server_cert.pem (the server's own certificate) is present;
@@ -279,6 +280,42 @@ def friendly_name(path):
     except Exception:
         pass
     return fallback
+
+
+# ---------------------------------------------------------------- own resource usage
+
+class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+    _fields_ = [("cb", wt.DWORD), ("PageFaultCount", wt.DWORD), ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t), ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t), ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t), ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t)]
+
+
+psapi = ctypes.WinDLL("psapi")
+kernel32.GetCurrentProcess.restype = wt.HANDLE
+psapi.GetProcessMemoryInfo.argtypes = [wt.HANDLE, ctypes.POINTER(PROCESS_MEMORY_COUNTERS), wt.DWORD]
+
+
+class SelfUsage:
+    """CPU and memory used by this background process (what Task Manager shows as AppTime)."""
+
+    def __init__(self):
+        self.last = (time.monotonic(), time.process_time())
+        self.cpu_percent = 0.0
+
+    def sample(self):
+        now, cpu = time.monotonic(), time.process_time()
+        wall = now - self.last[0]
+        if wall >= 2:  # average over at least a couple of seconds
+            self.cpu_percent = max(0.0, (cpu - self.last[1]) / wall / (os.cpu_count() or 1) * 100)
+            self.last = (now, cpu)
+        mem = PROCESS_MEMORY_COUNTERS(cb=ctypes.sizeof(PROCESS_MEMORY_COUNTERS))
+        psapi.GetProcessMemoryInfo(kernel32.GetCurrentProcess(), ctypes.byref(mem), mem.cb)
+        return {"cpu_percent": round(self.cpu_percent, 2), "memory_mb": round(mem.WorkingSetSize / 2**20, 1)}
+
+
+self_usage = SelfUsage()
 
 
 # ---------------------------------------------------------------- storage
@@ -753,6 +790,14 @@ def make_handler(tracker):
             if url.path == "/":
                 with open(os.path.join(RESOURCE_DIR, "dashboard.html"), "rb") as f:
                     return self.send(200, f.read(), "text/html; charset=utf-8")
+            if url.path in ("/assets/logo.png", "/favicon.ico"):
+                name = "logo.png" if url.path.endswith(".png") else "AppTime.ico"
+                ctype = "image/png" if name.endswith(".png") else "image/x-icon"
+                with open(os.path.join(RESOURCE_DIR, "assets", name), "rb") as f:
+                    return self.send(200, f.read(), ctype)
+            if url.path == "/api/window-ping":
+                # The dashboard window asks whether it should come to the front.
+                return self.send(200, {"focus": window.take_focus_request()})
             if url.path == "/api/stats":
                 tracker.flush()
                 rng = q.get("range", "day")
@@ -769,6 +814,7 @@ def make_handler(tracker):
                     conn.close()
                 data["paused"] = tracker.paused
                 data["idle_minutes"] = tracker.idle_minutes
+                data["usage"] = self_usage.sample()
                 return self.send(200, data)
             if url.path == "/api/share":
                 conn = connect()
@@ -785,6 +831,9 @@ def make_handler(tracker):
             url = urlparse(self.path)
             length = int(self.headers.get("Content-Length") or 0)
             body = json.loads(self.rfile.read(length) or b"{}")
+            if url.path == "/api/open-window":
+                window.open()
+                return self.send(200, {"ok": True})
             if url.path == "/api/settings":
                 if "idle_minutes" in body:
                     minutes = int(body["idle_minutes"])
@@ -818,6 +867,103 @@ def make_handler(tracker):
             self.send(404, {"error": "not found"})
 
     return Handler
+
+
+# ---------------------------------------------------------------- dashboard window
+#
+# The dashboard opens in its own window, run as a separate short-lived process.
+# Closing the window ends that process, so the window's memory is given back
+# and only the small background tracker keeps running.
+
+def own_command(*args):
+    if getattr(sys, "frozen", False):
+        return [sys.executable, *args]
+    exe = sys.executable
+    pythonw = os.path.join(os.path.dirname(exe), "pythonw.exe")
+    return [pythonw if os.path.exists(pythonw) else exe, os.path.abspath(__file__), *args]
+
+
+class DashboardWindow:
+    def __init__(self):
+        self.proc = None
+        self.focus_requested = False
+
+    def open(self):
+        if self.proc and self.proc.poll() is None:
+            self.focus_requested = True  # already open: bring it to the front
+            return
+        try:
+            self.proc = subprocess.Popen(own_command("--window"))
+        except OSError:
+            webbrowser.open(URL)
+
+    def take_focus_request(self):
+        requested, self.focus_requested = self.focus_requested, False
+        return requested
+
+    def close(self):
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+
+
+window = DashboardWindow()
+
+
+def windows_dark_mode():
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as key:
+            return winreg.QueryValueEx(key, "AppsUseLightTheme")[0] == 0
+    except OSError:
+        return False
+
+
+def run_window():
+    """Entry point of the `--window` process: shows the dashboard until closed."""
+    try:
+        import webview
+    except ImportError:
+        webbrowser.open(URL)
+        return
+
+    win = webview.create_window(
+        APP_NAME, URL, width=1120, height=860, min_size=(400, 500),
+        background_color="#111110" if windows_dark_mode() else "#f4f4f2",
+    )
+
+    closed = threading.Event()
+    win.events.closed += closed.set
+
+    def watch_focus():
+        # Lets the tray's "Open dashboard" bring this window forward.
+        while not closed.wait(1):
+            try:
+                with urllib.request.urlopen(URL + "api/window-ping", timeout=3) as res:
+                    if json.loads(res.read()).get("focus"):
+                        win.restore()
+                        win.show()
+                        win.on_top = True
+                        win.on_top = False
+            except Exception:
+                if not main_is_running():
+                    win.destroy()  # AppTime was quit: close the window too
+                    return
+
+    try:
+        webview.start(watch_focus, private_mode=True)
+    except Exception:
+        webbrowser.open(URL)  # e.g. the WebView2 runtime is missing
+    # Window closed: end this process right away so all its memory is freed,
+    # even if a helper thread is still finishing.
+    os._exit(0)
+
+
+def main_is_running():
+    try:
+        urllib.request.urlopen(URL + "api/window-ping", timeout=3).close()
+        return True
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------- startup / tray
@@ -859,6 +1005,9 @@ def set_start_with_windows(enabled):
 
 def tray_image():
     from PIL import Image, ImageDraw
+    path = os.path.join(RESOURCE_DIR, "assets", "tray.png")
+    if os.path.exists(path):
+        return Image.open(path)
     img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     d.ellipse((4, 4, 60, 60), fill=(42, 120, 214, 255))
@@ -872,7 +1021,7 @@ def run_tray(tracker, server):
     import pystray
 
     def open_dashboard(icon=None, item=None):
-        webbrowser.open(URL)
+        window.open()
 
     def toggle_pause(icon, item):
         tracker.paused = not tracker.paused
@@ -894,11 +1043,17 @@ def run_tray(tracker, server):
 
 
 def main():
+    if "--window" in sys.argv:
+        return run_window()
     try:
         server = ThreadingHTTPServer(("127.0.0.1", PORT), None)
     except OSError:
-        # Already running: just show the dashboard.
-        webbrowser.open(URL)
+        # Already running: ask that copy to show its dashboard.
+        try:
+            req = urllib.request.Request(URL + "api/open-window", data=b"{}", method="POST")
+            urllib.request.urlopen(req, timeout=5).close()
+        except Exception:
+            webbrowser.open(URL)
         return
 
     tracker = Tracker()
@@ -909,7 +1064,7 @@ def main():
         threading.Thread(target=uploader, args=(tracker.stop_event,), daemon=True).start()
         conn = connect()
         if not get_share(conn)["decided"]:
-            webbrowser.open(URL)  # first run: show the sharing question
+            window.open()  # first run: show the sharing question
         conn.close()
 
     if "--no-tray" in sys.argv:
@@ -931,6 +1086,7 @@ def main():
             except KeyboardInterrupt:
                 pass
 
+    window.close()
     tracker.stop_event.set()
     tracker.flush()
     server.shutdown()

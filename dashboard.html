@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AppTime</title>
+<link rel="icon" href="/assets/logo.png">
 <style>
   :root {
     color-scheme: light;
@@ -53,7 +54,8 @@
   }
   .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
   header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
-  h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: -0.01em; display: flex; align-items: center; gap: 10px; }
+  h1 img { width: 40px; height: 40px; }
   .status { display: flex; align-items: center; gap: 10px; color: var(--text-2); font-size: 13px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #1baf7a; display: inline-block; margin-right: 6px; }
   .paused .dot { background: var(--warn); }
@@ -175,7 +177,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>AppTime</h1>
+    <h1><img src="/assets/logo.png" alt="">AppTime</h1>
     <div class="status" id="status">
       <span id="status-text"><span class="dot"></span>Tracking</span>
       <button id="pause-btn" type="button">Pause</button>
@@ -235,6 +237,7 @@
       without keyboard or mouse input
     </label>
     <span id="privacy-line">All data stays on this computer.</span>
+    <span id="usage" title="CPU and memory used by AppTime's background tracker (shown as AppTime in Task Manager)"></span>
     <button type="button" class="link" id="share-link">Community sharing: off</button>
   </footer>
 </div>
@@ -328,6 +331,7 @@ function render() {
   $("status-text").innerHTML = `<span class="dot"></span>${d.paused ? "Paused" : "Tracking"}`;
   $("pause-btn").textContent = d.paused ? "Resume" : "Pause";
   $("idle").value = String(d.idle_minutes);
+  if (d.usage) $("usage").textContent = `AppTime is using ${d.usage.cpu_percent.toFixed(1)}% CPU · ${Math.round(d.usage.memory_mb)} MB memory`;
 
   $("filter").classList.toggle("on", !!d.app);
   $("filter-name").textContent = d.app_name || "";

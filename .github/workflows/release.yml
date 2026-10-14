@@ -30,7 +30,7 @@ jobs:
       - name: Build
         run: |
           pip install pyinstaller==6.11.1 -r requirements.txt
-          pyinstaller --onefile --noconsole --name AppTime --add-data "dashboard.html;." --add-data "server_cert.pem;." apptime.py
+          pyinstaller --onefile --noconsole --name AppTime --icon assets/AppTime.ico --version-file version_info.txt --add-data "dashboard.html;." --add-data "server_cert.pem;." --add-data "assets;assets" apptime.py
 
       - uses: softprops/action-gh-release@v2
         with:
