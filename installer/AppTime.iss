@@ -42,6 +42,9 @@ SolidCompression=yes
 ; AppTime is closed by the [Code] below, so the installer doesn't ask about it.
 CloseApplications=no
 
+[Messages]
+FinishedLabel=AppTime is installed.%n%nIt runs quietly in the background and lives in the system tray, near the clock (look under the ^ arrow if you don't see the cat). It starts by itself when you sign in.%n%nClick the cat any time to open your dashboard.
+
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 

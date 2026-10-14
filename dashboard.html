@@ -190,6 +190,12 @@
     </div>
   </header>
 
+  <div class="update-bar" id="tray-tip" role="note">
+    <span><strong>AppTime keeps running after you close this window.</strong>
+      <span id="tray-tip-where"></span></span>
+    <span class="actions"><button type="button" class="primary" id="tray-tip-ok">Got it</button></span>
+  </div>
+
   <div class="update-bar" id="update-bar" role="status">
     <span id="update-text"></span>
     <span class="actions">
@@ -350,6 +356,10 @@ function render() {
   $("pause-btn").textContent = d.paused ? "Resume" : "Pause";
   $("idle").value = String(d.idle_minutes);
   $("startup").checked = !!d.startup;
+  $("tray-tip").classList.toggle("on", !!d.tray_tip);
+  $("tray-tip-where").textContent = d.platform === "darwin"
+    ? "It tracks in the background. Click the cat in the menu bar at the top of the screen to open it again."
+    : "It tracks in the background. Click the cat near the clock to open it again (it may be under the ^ arrow).";
   $("startup-label").textContent = "Start AppTime automatically";
   if (d.usage) $("usage").textContent = `AppTime is using ${d.usage.cpu_percent.toFixed(1)}% CPU · ${Math.round(d.usage.memory_mb)} MB memory`;
 
@@ -602,6 +612,7 @@ $("table-toggle").addEventListener("click", () => { state.showTable = !state.sho
 $("pause-btn").addEventListener("click", () => post({ paused: !state.data.paused }));
 $("idle").addEventListener("change", e => post({ idle_minutes: +e.target.value }));
 $("startup").addEventListener("change", e => post({ startup: e.target.checked }));
+$("tray-tip-ok").addEventListener("click", () => { $("tray-tip").classList.remove("on"); post({ tray_tip_seen: true }); });
 
 // Backups use the window's native Save / Open dialogs (only in the AppTime window).
 function showBackup() { if (window.pywebview && window.pywebview.api) $("backup").hidden = false; }

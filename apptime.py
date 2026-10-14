@@ -639,6 +639,10 @@ def make_handler(tracker):
                 data["usage"] = self_usage.sample()
                 data["startup"] = osx.startup_enabled()
                 data["startup_label"] = osx.STARTUP_LABEL
+                conn = connect()
+                data["tray_tip"] = not get_setting(conn, "tray_tip_seen", False)
+                conn.close()
+                data["platform"] = sys.platform
                 return self.send(200, data)
             if url.path == "/api/share":
                 conn = connect()
@@ -684,6 +688,10 @@ def make_handler(tracker):
                     tracker.paused = bool(body["paused"])
                 if "startup" in body:
                     set_startup(bool(body["startup"]))
+                if body.get("tray_tip_seen"):
+                    conn = connect()
+                    set_setting(conn, "tray_tip_seen", True)
+                    conn.close()
                 return self.send(200, {"ok": True})
             if url.path in ("/api/export", "/api/import"):
                 path = str(body.get("path") or "")
@@ -887,7 +895,7 @@ app_updater = updater.Updater(APP_VERSION, f"{APP_NAME}/{APP_VERSION}", restart_
 
 def set_startup(enabled):
     """The person switched starting at sign-in on or off."""
-    osx.set_startup(enabled, own_command())
+    osx.set_startup(enabled, own_command("--background"))
     conn = connect()
     set_setting(conn, "startup", bool(enabled))
     conn.close()
@@ -904,9 +912,9 @@ def ensure_startup():
     conn.close()
     try:
         if wanted:
-            osx.set_startup(True, own_command())
+            osx.set_startup(True, own_command("--background"))
         elif osx.startup_enabled():
-            osx.set_startup(False, own_command())
+            osx.set_startup(False, own_command("--background"))
     except OSError:
         pass
 
@@ -1028,7 +1036,10 @@ def main():
     ensure_startup()
     threading.Thread(target=app_updater.loop, args=(tracker.stop_event,), daemon=True).start()
     threading.Timer(15, updater.remove_old_copy).start()  # previous version, if we were just updated
-    if after_update:
+    # Opened by the person (Start menu, installer, after an update): show the
+    # dashboard. Started at sign-in (--background): stay quietly in the tray.
+    background = "--background" in sys.argv
+    if not background:
         window.open()
     server.RequestHandlerClass = make_handler(tracker)
     threading.Thread(target=tracker.run, daemon=True).start()
@@ -1036,8 +1047,8 @@ def main():
     if sharing_available():
         threading.Thread(target=uploader, args=(tracker.stop_event,), daemon=True).start()
         conn = connect()
-        if not get_share(conn)["decided"]:
-            window.open()  # first run: show the sharing question
+        if background and not get_share(conn)["decided"]:
+            window.open()  # the sharing question hasn't been answered yet
         conn.close()
 
     if "--no-tray" in sys.argv:
