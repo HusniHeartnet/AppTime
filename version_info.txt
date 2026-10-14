@@ -2,8 +2,8 @@
 # Task Manager shows FileDescription as the process name.
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 6, 0, 0),
-    prodvers=(1, 6, 0, 0),
+    filevers=(1, 6, 1, 0),
+    prodvers=(1, 6, 1, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -16,12 +16,12 @@ VSVersionInfo(
       StringTable('040904B0', [
         StringStruct('CompanyName', 'Husni Heartnet'),
         StringStruct('FileDescription', 'AppTime'),
-        StringStruct('FileVersion', '1.6.0'),
+        StringStruct('FileVersion', '1.6.1'),
         StringStruct('InternalName', 'AppTime'),
         StringStruct('LegalCopyright', 'Husni Heartnet'),
         StringStruct('OriginalFilename', 'AppTime.exe'),
         StringStruct('ProductName', 'AppTime'),
-        StringStruct('ProductVersion', '1.6.0')
+        StringStruct('ProductVersion', '1.6.1')
       ])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])

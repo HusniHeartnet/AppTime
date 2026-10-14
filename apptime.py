@@ -35,7 +35,7 @@ else:
     import platform_win as osx
 
 APP_NAME = "AppTime"
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.6.1"
 
 # Community sharing (see server/README.md). Sharing is only offered when the
 # URL is set AND server_cert.pem (the server's own certificate) is present;
@@ -872,26 +872,27 @@ app_updater = updater.Updater(APP_VERSION, f"{APP_NAME}/{APP_VERSION}", restart_
 
 
 def set_startup(enabled):
+    """The person switched starting at sign-in on or off."""
     osx.set_startup(enabled, own_command())
     conn = connect()
-    set_setting(conn, "startup_decided", True)  # never switch it back on by ourselves
+    set_setting(conn, "startup", bool(enabled))
     conn.close()
 
 
 def ensure_startup():
-    """Installed app: start automatically at sign-in, unless the person turned
-    that off. Also keeps the entry pointing at the app's current location if
-    the app file was moved."""
+    """Installed app: start automatically at sign-in unless the person switched
+    that off. Runs at every start, so the startup entry is put back if it went
+    missing, and follows the app if its file was moved."""
     if not getattr(sys, "frozen", False):
         return  # running from source code: leave it to the person
     conn = connect()
-    decided = get_setting(conn, "startup_decided", False)
+    wanted = get_setting(conn, "startup", True)
     conn.close()
     try:
-        if not decided:
-            set_startup(True)
-        elif osx.startup_enabled():
+        if wanted:
             osx.set_startup(True, own_command())
+        elif osx.startup_enabled():
+            osx.set_startup(False, own_command())
     except OSError:
         pass
 
@@ -934,7 +935,32 @@ def run_tray(tracker, server):
     )
     icon = pystray.Icon(APP_NAME, tray_image(), APP_NAME, menu)
     running["tray"] = icon
+    if sys.platform == "win32":
+        allow_windows_shutdown(icon, tracker)
     icon.run()
+
+
+def allow_windows_shutdown(icon, tracker):
+    """Let Windows shut down or restart, saving the latest time first.
+
+    Before shutting down, Windows asks every window whether it may. pystray's
+    tray window answers 0 ("no") to every message it doesn't handle itself, so
+    without this AppTime would block shutdown and get force-closed."""
+    WM_QUERYENDSESSION, WM_ENDSESSION = 0x0011, 0x0016
+
+    def may_end(wparam, lparam):
+        tracker.flush()
+        return 1  # yes, go ahead
+
+    def ending(wparam, lparam):
+        if wparam:  # the session really is ending
+            tracker.stop_event.set()
+            tracker.flush()
+            window.close()
+        return 0
+
+    icon._message_handlers[WM_QUERYENDSESSION] = may_end
+    icon._message_handlers[WM_ENDSESSION] = ending
 
 
 def selftest():
