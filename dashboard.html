@@ -1,0 +1,674 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AppTime</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f4f2;
+    --surface: #fcfcfb;
+    --border: #e4e3df;
+    --grid: #ebeae6;
+    --text: #0b0b0b;
+    --text-2: #52514e;
+    --text-3: #7a7974;
+    --accent: #2a78d6;
+    --accent-hover: #1d63b8;
+    --accent-soft: #e6effa;
+    --track: #edece8;
+    --warn: #b26b00;
+    --c0: #2a78d6; --c1: #eb6834; --c2: #1baf7a; --c3: #eda100; --c4: #e87ba4; --c5: #008300; --c6: #4a3aa7; --c-other: #b4b3ad;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #111110;
+      --surface: #1a1a19;
+      --border: #2c2c2a;
+      --grid: #262624;
+      --text: #ffffff;
+      --text-2: #c3c2b7;
+      --text-3: #8f8e86;
+      --accent: #3987e5;
+      --accent-hover: #63a2ee;
+      --accent-soft: #1d2a3b;
+      --track: #262624;
+      --warn: #e0a040;
+      --c0: #3987e5; --c1: #d95926; --c2: #199e70; --c3: #c98500; --c4: #d55181; --c5: #008300; --c6: #9085e9; --c-other: #5e5d58;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #111110; --surface: #1a1a19; --border: #2c2c2a; --grid: #262624;
+    --text: #ffffff; --text-2: #c3c2b7; --text-3: #8f8e86;
+    --accent: #3987e5; --accent-hover: #63a2ee; --accent-soft: #1d2a3b; --track: #262624; --warn: #e0a040;
+    --c0: #3987e5; --c1: #d95926; --c2: #199e70; --c3: #c98500; --c4: #d55181; --c5: #008300; --c6: #9085e9; --c-other: #5e5d58;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  .status { display: flex; align-items: center; gap: 10px; color: var(--text-2); font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #1baf7a; display: inline-block; margin-right: 6px; }
+  .paused .dot { background: var(--warn); }
+  button {
+    font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 12px; cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--text-3); }
+  button:disabled { opacity: 0.35; cursor: default; }
+  button:focus-visible, select:focus-visible, .app-row:focus-visible, .bar-hit:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+  .tabs { display: inline-flex; background: var(--track); border-radius: 10px; padding: 3px; }
+  .tabs button { border: none; background: transparent; border-radius: 8px; padding: 6px 14px; color: var(--text-2); }
+  .tabs button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.08); font-weight: 600; }
+  .nav { display: flex; align-items: center; gap: 6px; }
+  .nav .label { min-width: 190px; text-align: center; font-weight: 600; }
+  .nav button.arrow { width: 34px; padding: 6px 0; }
+
+  .filter { display: none; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 14px; color: var(--text-2); }
+  .filter.on { display: flex; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-soft); color: var(--text); border-radius: 999px; padding: 3px 4px 3px 12px; font-weight: 600; }
+  .chip button { border: none; background: transparent; padding: 0 8px; border-radius: 999px; color: var(--text-2); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 16px; }
+  .recap-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); margin: 0 0 4px; font-weight: 600; }
+  .hero { font-size: 40px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .hero-sub { color: var(--text-2); margin-top: 4px; font-size: 14px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-top: 20px; }
+  .tile { border-top: 1px solid var(--border); padding-top: 10px; }
+  .tile .k { font-size: 12px; color: var(--text-3); }
+  .tile .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile .s { font-size: 12px; color: var(--text-2); }
+
+  .chart-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; gap: 8px; }
+  .chart-head h2, .apps-head h2 { font-size: 15px; margin: 0; font-weight: 600; }
+  .hint { font-size: 12px; color: var(--text-3); }
+  .link { border: none; background: none; color: var(--accent); padding: 0; font-size: 13px; }
+  .link:hover { text-decoration: underline; }
+  #chart { position: relative; }
+  #chart svg { display: block; width: 100%; overflow: visible; }
+  #chart .gridline { stroke: var(--grid); stroke-width: 1; }
+  #chart .axis { fill: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+  #chart .bar { pointer-events: none; transition: filter .1s, opacity .1s; }
+  #chart .bar-hit { fill: transparent; cursor: pointer; outline: none; }
+  #chart svg:has(.bar-hit:hover) .bar, #chart svg:has(.bar-hit:focus) .bar { opacity: 0.45; }
+  #chart .bar-hit:hover + .bar, #chart .bar-hit:focus + .bar { opacity: 1; }
+  .tooltip {
+    position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.12);
+    white-space: nowrap; opacity: 0; transition: opacity .08s; z-index: 1;
+  }
+  .tooltip strong { display: block; font-size: 14px; font-variant-numeric: tabular-nums; }
+  .tooltip span { color: var(--text-2); }
+  .tooltip .rows { display: grid; grid-template-columns: 10px auto auto; gap: 2px 8px; align-items: center; margin-top: 6px; }
+  .tooltip .key { width: 10px; height: 3px; border-radius: 2px; }
+  .tooltip .rows b { font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+  table.data { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  table.data th, table.data td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+  table.data td:last-child, table.data th:last-child { text-align: right; }
+  .empty { color: var(--text-3); text-align: center; padding: 40px 0; }
+
+  .apps-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .app-row {
+    display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 4px 12px; align-items: center;
+    padding: 10px 8px; margin: 0 -8px; border-radius: 10px; cursor: pointer; outline: none;
+  }
+  .app-row:hover { background: var(--bg); }
+  .app-row.selected { background: var(--accent-soft); }
+  .avatar {
+    grid-row: span 2; width: 32px; height: 32px; border-radius: 8px; background: var(--c-other); color: #fff;
+    display: grid; place-items: center; font-weight: 700; font-size: 14px;
+  }
+  .app-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .app-time { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+  .app-bar { height: 6px; background: var(--track); border-radius: 3px; overflow: hidden; }
+  .app-bar div { height: 100%; border-radius: 3px; }
+  .app-pct { font-size: 12px; color: var(--text-3); text-align: right; font-variant-numeric: tabular-nums; }
+
+  footer { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; color: var(--text-3); font-size: 13px; margin-top: 8px; }
+  dialog {
+    width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 24px; border: 1px solid var(--border);
+    border-radius: 16px; background: var(--surface); color: var(--text); box-shadow: 0 20px 60px rgba(0,0,0,.3);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog h2 { font-size: 20px; margin: 0 0 8px; }
+  dialog h3 { font-size: 14px; margin: 20px 0 6px; }
+  dialog p, dialog li { color: var(--text-2); font-size: 14px; margin: 6px 0; }
+  dialog ul { padding-left: 20px; margin: 6px 0; }
+  dialog a { color: var(--accent); }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+  .primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  .primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .danger { color: #d03b3b; }
+  .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: var(--bg); border-radius: 10px; margin-top: 12px; }
+  .switch-row strong { display: block; }
+  .switch-row span { color: var(--text-3); font-size: 13px; }
+  .preview { background: var(--bg); border-radius: 10px; padding: 10px 12px; font-size: 13px; max-height: 220px; overflow: auto; }
+  .preview table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  .preview td { padding: 3px 4px; color: var(--text-2); }
+  .preview td:last-child { text-align: right; }
+  .preview td.day { font-weight: 600; color: var(--text); padding-top: 8px; text-align: left; }
+  .hide-list { max-height: 180px; overflow: auto; background: var(--bg); border-radius: 10px; padding: 6px 12px; }
+  .hide-list label { display: flex; align-items: center; gap: 8px; font-size: 14px; padding: 4px 0; color: var(--text-2); }
+  .muted { color: var(--text-3); font-size: 13px; }
+  #share-link { display: none; }
+  select { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; }
+
+  @media (max-width: 620px) {
+    .controls { flex-direction: column; align-items: stretch; }
+    .tabs { display: flex; }
+    .tabs button { flex: 1; padding: 6px 4px; }
+    .nav { justify-content: space-between; }
+    .nav .label { min-width: 0; flex: 1; font-size: 14px; }
+    .hero { font-size: 32px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>AppTime</h1>
+    <div class="status" id="status">
+      <span id="status-text"><span class="dot"></span>Tracking</span>
+      <button id="pause-btn" type="button">Pause</button>
+    </div>
+  </header>
+
+  <div class="controls">
+    <div class="tabs" role="group" aria-label="Time range">
+      <button type="button" data-range="day">Day</button>
+      <button type="button" data-range="week">Week</button>
+      <button type="button" data-range="month">Month</button>
+      <button type="button" data-range="year">Year</button>
+      <button type="button" data-range="all">Lifetime</button>
+    </div>
+    <div class="nav">
+      <button type="button" class="arrow" id="prev" aria-label="Previous period">‹</button>
+      <div class="label" id="period-label">…</div>
+      <button type="button" class="arrow" id="next" aria-label="Next period">›</button>
+      <button type="button" id="today-btn">Now</button>
+    </div>
+  </div>
+
+  <div class="filter" id="filter">
+    Showing only <span class="chip"><span id="filter-name"></span><button type="button" id="filter-clear" aria-label="Show all apps">✕</button></span>
+  </div>
+
+  <section class="card">
+    <p class="recap-title" id="recap-title">Screen time</p>
+    <div class="hero" id="total">—</div>
+    <div class="hero-sub" id="total-sub"></div>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <section class="card">
+    <div class="chart-head">
+      <h2 id="chart-title">Over time</h2>
+      <div><span class="hint" id="chart-hint"></span> <button type="button" class="link" id="table-toggle">Show table</button></div>
+    </div>
+    <div id="chart"><div class="tooltip" id="tooltip"></div></div>
+  </section>
+
+  <section class="card">
+    <div class="apps-head">
+      <h2>Apps</h2>
+      <span class="hint">Apps on screen at the same time each get the full time · click an app to see only it</span>
+    </div>
+    <div id="apps"></div>
+  </section>
+
+  <footer>
+    <label>Stop counting after
+      <select id="idle">
+        <option value="1">1 min</option><option value="2">2 min</option><option value="3">3 min</option>
+        <option value="5">5 min</option><option value="10">10 min</option><option value="15">15 min</option>
+        <option value="30">30 min</option>
+      </select>
+      without keyboard or mouse input
+    </label>
+    <span id="privacy-line">All data stays on this computer.</span>
+    <button type="button" class="link" id="share-link">Community sharing: off</button>
+  </footer>
+</div>
+
+<dialog id="consent" aria-labelledby="consent-title">
+  <h2 id="consent-title">Share with the AppTime community?</h2>
+  <p>AppTime can send <strong>anonymous daily totals</strong> of which apps were on your screen, so the community
+  can see which apps people use most. Combined results (never anyone's own numbers) are posted in the
+  AppTime community and on social media. It's completely optional, and AppTime works the same either way.</p>
+  <h3>What's shared, once a day</h3>
+  <ul>
+    <li>Your total screen time for the day</li>
+    <li>Each app's name and how long it was on screen</li>
+    <li>A random ID that isn't linked to you</li>
+  </ul>
+  <h3>Never shared</h3>
+  <ul>
+    <li>Window titles, websites, files or anything you type</li>
+    <li>Your name, account or computer name</li>
+  </ul>
+  <p>Only days from today onwards are shared. You can see exactly what's sent, hide apps, turn it off, or delete
+  your shared data any time from <em>Community sharing</em> at the bottom of this page.
+  <a id="consent-privacy" href="#" target="_blank" rel="noopener">Privacy policy</a></p>
+  <div class="actions">
+    <button type="button" id="consent-no">No thanks</button>
+    <button type="button" class="primary" id="consent-yes">Share anonymously</button>
+  </div>
+</dialog>
+
+<dialog id="share-panel" aria-labelledby="share-title">
+  <h2 id="share-title">Community sharing</h2>
+  <p>Anonymous daily app totals, used to post which apps the AppTime community uses most.
+    <span id="community-wrap"><a id="community-link" href="#" target="_blank" rel="noopener">See where results are posted</a> · </span>
+    <a id="panel-privacy" href="#" target="_blank" rel="noopener">Privacy policy</a></p>
+  <div class="switch-row">
+    <div><strong id="share-state">Off</strong><span id="share-status"></span></div>
+    <button type="button" id="share-toggle">Turn on</button>
+  </div>
+
+  <h3 id="preview-title">What's shared</h3>
+  <div class="preview" id="preview"></div>
+
+  <h3>Never share these apps</h3>
+  <div class="hide-list" id="hide-list"></div>
+
+  <div class="actions">
+    <button type="button" class="danger" id="share-delete">Delete my shared data</button>
+    <button type="button" class="primary" id="share-close">Done</button>
+  </div>
+</dialog>
+
+<script>
+const state = { range: "day", date: null, app: null, showTable: false, data: null };
+const $ = (id) => document.getElementById(id);
+
+function fmt(sec, opts = {}) {
+  sec = Math.round(sec || 0);
+  if (sec === 0) return "0m";
+  if (sec < 60) return "<1m";
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  if (!h) return `${m}m`;
+  if (opts.hoursOnly) return `${h.toLocaleString()}h`;
+  return m ? `${h.toLocaleString()}h ${m}m` : `${h.toLocaleString()}h`;
+}
+function fmtHours(sec) {
+  return (Math.floor(sec / 360) / 10).toLocaleString(undefined, { minimumFractionDigits: 1 });
+}
+function parseDate(s) { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d); }
+function niceDate(s, o = { day: "numeric", month: "short", year: "numeric" }) { return parseDate(s).toLocaleDateString(undefined, o); }
+
+async function load() {
+  const params = new URLSearchParams({ range: state.range });
+  if (state.date) params.set("date", state.date);
+  if (state.app) params.set("app", state.app);
+  const res = await fetch(`/api/stats?${params}`);
+  state.data = await res.json();
+  if (!state.date) state.date = state.data.anchor;
+  render();
+}
+
+function render() {
+  const d = state.data;
+  document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-pressed", b.dataset.range === d.range));
+  $("period-label").textContent = d.label;
+  $("prev").disabled = !d.prev;
+  $("next").disabled = !d.next;
+  $("prev").style.visibility = $("next").style.visibility = d.range === "all" ? "hidden" : "visible";
+  $("today-btn").style.visibility = d.range === "all" ? "hidden" : "visible";
+
+  $("status").classList.toggle("paused", d.paused);
+  $("status-text").innerHTML = `<span class="dot"></span>${d.paused ? "Paused" : "Tracking"}`;
+  $("pause-btn").textContent = d.paused ? "Resume" : "Pause";
+  $("idle").value = String(d.idle_minutes);
+
+  $("filter").classList.toggle("on", !!d.app);
+  $("filter-name").textContent = d.app_name || "";
+
+  renderSummary(d);
+  renderChart(d);
+  renderApps(d);
+}
+
+function tile(k, v, s) {
+  const el = document.createElement("div");
+  el.className = "tile";
+  const a = document.createElement("div"); a.className = "k"; a.textContent = k;
+  const b = document.createElement("div"); b.className = "v"; b.textContent = v; b.title = v;
+  el.append(a, b);
+  if (s) { const c = document.createElement("div"); c.className = "s"; c.textContent = s; el.append(c); }
+  return el;
+}
+
+const PERIOD_WORD = { day: "day", week: "week", month: "month", year: "year" };
+const BUCKET_WORD = { hour: "Busiest hour", day: "Busiest day", month: "Busiest month", year: "Busiest year" };
+
+function bucketName(d, b) {
+  if (d.unit === "hour") return `${b.label}:00–${String((+b.key + 1) % 24).padStart(2, "0")}:00`;
+  if (d.unit === "day") return niceDate(b.key, { weekday: "short", day: "numeric", month: "short" });
+  if (d.unit === "month") { const [y, m] = b.key.split("-"); return new Date(+y, +m - 1, 1).toLocaleDateString(undefined, { month: "long", year: "numeric" }); }
+  return b.key;
+}
+
+function renderSummary(d) {
+  const titles = { day: "Screen time", week: "Weekly recap", month: "Monthly recap", year: "Yearly recap", all: "Lifetime" };
+  $("recap-title").textContent = titles[d.range];
+  $("total").textContent = fmt(d.total);
+
+  const tiles = $("tiles");
+  tiles.replaceChildren();
+
+  if (d.range === "all") {
+    $("total-sub").textContent = d.total >= 3600 ? `${fmtHours(d.total)} hours since ${niceDate(d.first_day)}` : `Since ${niceDate(d.first_day)}`;
+    tiles.append(tile("Days tracked", d.days_tracked.toLocaleString()));
+    tiles.append(tile("Average per tracked day", fmt(d.days_tracked ? d.total / d.days_tracked : 0)));
+  } else {
+    let sub = "";
+    if (d.previous_total != null && d.previous_total > 0) {
+      const pct = Math.round((d.total - d.previous_total) / d.previous_total * 100);
+      const word = PERIOD_WORD[d.range];
+      sub = pct === 0 ? `Same as the previous ${word}` : `${Math.abs(pct)}% ${pct > 0 ? "more" : "less"} than the previous ${word} (${fmt(d.previous_total)})`;
+    } else if (d.previous_total === 0) {
+      sub = `Nothing tracked the previous ${PERIOD_WORD[d.range]}`;
+    }
+    $("total-sub").textContent = sub;
+    if (d.range !== "day") {
+      tiles.append(tile("Daily average", fmt(d.days_tracked ? d.total / d.days_tracked : 0), `over ${d.days_tracked} tracked day${d.days_tracked === 1 ? "" : "s"}`));
+    }
+  }
+  if (d.busiest && d.busiest.seconds > 0) tiles.append(tile(BUCKET_WORD[d.unit], bucketName(d, d.busiest), fmt(d.busiest.seconds)));
+  if (!d.app && d.apps.length) {
+    tiles.append(tile("Most used app", d.apps[0].name, fmt(d.apps[0].seconds)));
+    tiles.append(tile("Apps used", String(d.apps.length)));
+  }
+}
+
+function niceStep(maxSec) {
+  const steps = [300, 600, 900, 1800, 3600, 7200, 10800, 18000, 36000, 72000, 180000, 360000, 720000, 1800000, 3600000, 7200000];
+  for (const s of steps) if (maxSec / s <= 4) return s;
+  return steps[steps.length - 1];
+}
+
+function drillTarget(d, b) {
+  if (d.unit === "day") return { range: "day", date: b.key };
+  if (d.unit === "month") return { range: "month", date: `${b.key}-01` };
+  if (d.unit === "year") return { range: "year", date: `${b.key}-01-01` };
+  return null;
+}
+
+function appColor(d, exe) {
+  const slot = d.colors[exe];
+  return slot == null ? "var(--c-other)" : `var(--c${slot})`;
+}
+
+function segments(d, b) {
+  const names = Object.fromEntries(d.apps.map(a => [a.exe, a.name]));
+  const bySlot = new Map();
+  for (const [exe, sec] of Object.entries(b.apps)) {
+    const slot = d.colors[exe] ?? 99;
+    const cur = bySlot.get(slot) || { seconds: 0, color: appColor(d, exe), name: slot === 99 ? "Other apps" : (names[exe] || exe) };
+    cur.seconds += sec;
+    bySlot.set(slot, cur);
+  }
+  return [...bySlot.entries()].sort((a, b) => a[0] - b[0]).map(e => e[1]);
+}
+
+function renderChart(d) {
+  const chart = $("chart");
+  const tooltip = $("tooltip");
+  chart.replaceChildren(tooltip);
+  const unitWord = { hour: "hour", day: "day", month: "month", year: "year" }[d.unit];
+  $("chart-title").textContent = d.app_name ? `${d.app_name} by ${unitWord}` : `Screen time by ${unitWord}`;
+  $("chart-hint").textContent = d.unit === "hour" ? "" : "Click a bar to zoom in ·";
+  $("table-toggle").textContent = state.showTable ? "Show chart" : "Show table";
+
+  if (!d.total) {
+    const e = document.createElement("div"); e.className = "empty";
+    e.textContent = d.range === "day" && d.anchor === d.today ? "Nothing tracked yet today. Time shows up here as you use your apps." : "Nothing tracked in this period.";
+    chart.append(e); return;
+  }
+
+  if (state.showTable) {
+    const t = document.createElement("table"); t.className = "data";
+    const head = t.createTHead().insertRow();
+    for (const h of [unitWord[0].toUpperCase() + unitWord.slice(1), "Time"]) { const th = document.createElement("th"); th.textContent = h; head.append(th); }
+    const body = t.createTBody();
+    for (const b of d.buckets) { const r = body.insertRow(); r.insertCell().textContent = bucketName(d, b); r.insertCell().textContent = fmt(b.seconds); }
+    chart.append(t); return;
+  }
+
+  const W = Math.max(chart.clientWidth, 280), H = 220, padL = 44, padB = 24, padT = 8;
+  const plotW = W - padL, plotH = H - padB - padT;
+  const max = Math.max(...d.buckets.map(b => b.seconds), 60);
+  const step = niceStep(max);
+  const top = Math.ceil(max / step) * step;
+  const n = d.buckets.length;
+  const slot = plotW / n;
+  const gap = Math.max(2, Math.min(slot * 0.3, 14));
+  const bw = Math.max(slot - gap, 2);
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("height", H);
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", `${$("chart-title").textContent}. Use Show table for exact values.`);
+  const el = (tag, attrs, text) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
+
+  for (let v = 0; v <= top; v += step) {
+    const y = padT + plotH - (v / top) * plotH;
+    svg.append(el("line", { x1: padL, x2: W, y1: y, y2: y, class: "gridline" }));
+    svg.append(el("text", { x: padL - 8, y: y + 4, "text-anchor": "end", class: "axis" }, v === 0 ? "0" : fmt(v, { hoursOnly: v >= 3600 })));
+  }
+
+  const labelEvery = Math.ceil(n / Math.floor(plotW / 34));
+  d.buckets.forEach((b, i) => {
+    const x = padL + i * slot + gap / 2;
+    const h = (b.seconds / top) * plotH;
+    const y = padT + plotH - h;
+    const target = drillTarget(d, b);
+    const hit = el("rect", { x: padL + i * slot, y: padT, width: slot, height: plotH, class: "bar-hit", tabindex: 0,
+      "aria-label": `${bucketName(d, b)}: ${fmt(b.seconds)}` });
+    if (!target) hit.style.cursor = "default";
+    // Stack one segment per color slot: slot 0 at the bottom, "Other" on top.
+    const segs = segments(d, b);
+    // Several apps can share the screen, so app times can add up to more than the
+    // bar; each app gets its share of the bar's height, and the tooltip has real times.
+    const segSum = segs.reduce((t, sg) => t + sg.seconds, 0);
+    const fit = segSum > 0 ? b.seconds / segSum : 0;
+    const bar = el("g", { class: "bar" });
+    let base = padT + plotH;
+    segs.forEach((sg, j) => {
+      const hs = (sg.seconds * fit / top) * plotH;
+      const isTop = j === segs.length - 1;
+      const hh = isTop || hs <= 3 ? hs : hs - 2; // 2px surface gap between segments
+      const yt = base - hs;
+      const r = isTop ? Math.min(4, bw / 2, hh) : 0;
+      if (hh > 0) bar.append(el("path", { fill: sg.color, d:
+        `M${x},${base} V${base - hh + r} Q${x},${base - hh} ${x + r},${base - hh} H${x + bw - r} Q${x + bw},${base - hh} ${x + bw},${base - hh + r} V${base} Z` }));
+      base = yt;
+    });
+    const show = () => {
+      tooltip.replaceChildren();
+      const s = document.createElement("strong"); s.textContent = fmt(b.seconds);
+      const l = document.createElement("span"); l.textContent = bucketName(d, b);
+      tooltip.append(s, l);
+      if (segs.length > 1) {
+        const rows = document.createElement("div"); rows.className = "rows";
+        for (const sg of [...segs].reverse()) {
+          const k = document.createElement("i"); k.className = "key"; k.style.background = sg.color;
+          const n = document.createElement("span"); n.textContent = sg.name;
+          const v = document.createElement("b"); v.textContent = fmt(sg.seconds);
+          rows.append(k, n, v);
+        }
+        tooltip.append(rows);
+      }
+      const scale = chart.clientWidth / W;
+      // Beside the bar (right, or left near the edge), aligned to the top of the plot.
+      let left = (x + bw) * scale + 8;
+      if (left + tooltip.offsetWidth > chart.clientWidth) left = x * scale - 8 - tooltip.offsetWidth;
+      tooltip.style.left = `${Math.max(left, 0)}px`;
+      tooltip.style.top = `${padT}px`;
+      tooltip.style.opacity = 1;
+    };
+    const hide = () => { tooltip.style.opacity = 0; };
+    hit.addEventListener("pointerenter", show);
+    hit.addEventListener("focus", show);
+    hit.addEventListener("pointerleave", hide);
+    hit.addEventListener("blur", hide);
+    const go = () => { if (target) { hide(); state.range = target.range; state.date = target.date; load(); } };
+    hit.addEventListener("click", go);
+    hit.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+    svg.append(hit, bar);
+    if (i % labelEvery === 0) svg.append(el("text", { x: x + bw / 2, y: H - 6, "text-anchor": "middle", class: "axis" }, b.label));
+  });
+  chart.append(svg);
+}
+
+function renderApps(d) {
+  const list = $("apps");
+  list.replaceChildren();
+  if (!d.apps.length) {
+    const e = document.createElement("div"); e.className = "empty"; e.textContent = "No apps yet."; list.append(e); return;
+  }
+  const max = d.apps[0].seconds;
+  for (const a of d.apps) {
+    const row = document.createElement("div");
+    row.className = "app-row" + (a.exe === d.app ? " selected" : "");
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.setAttribute("aria-label", `${a.name}, ${fmt(a.seconds)}. Show only this app.`);
+    const av = document.createElement("div"); av.className = "avatar"; av.textContent = (a.name.trim()[0] || "?").toUpperCase(); av.style.background = appColor(d, a.exe);
+    const name = document.createElement("div"); name.className = "app-name"; name.textContent = a.name; name.title = `${a.name} (${a.exe})`;
+    const time = document.createElement("div"); time.className = "app-time"; time.textContent = fmt(a.seconds);
+    const bar = document.createElement("div"); bar.className = "app-bar";
+    const fill = document.createElement("div"); fill.style.background = appColor(d, a.exe); fill.style.width = `${Math.max(a.seconds / max * 100, 0.5)}%`; bar.append(fill);
+    const pct = document.createElement("div"); pct.className = "app-pct";
+    pct.textContent = d.screen_total ? `${Math.min(100, Math.round(a.seconds / d.screen_total * 100))}% of screen time` : "";
+    row.append(av, name, time, bar, pct);
+    const pick = () => { state.app = state.app === a.exe ? null : a.exe; load(); };
+    row.addEventListener("click", pick);
+    row.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    list.append(row);
+  }
+}
+
+async function post(body) {
+  await fetch("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  load();
+}
+
+document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => {
+  state.range = b.dataset.range;
+  if (state.range === "all") state.date = null;
+  else if (!state.date) state.date = state.data?.today;
+  load();
+}));
+$("prev").addEventListener("click", () => { state.date = state.data.prev; load(); });
+$("next").addEventListener("click", () => { state.date = state.data.next; load(); });
+$("today-btn").addEventListener("click", () => { state.date = state.data.today; load(); });
+$("filter-clear").addEventListener("click", () => { state.app = null; load(); });
+$("table-toggle").addEventListener("click", () => { state.showTable = !state.showTable; render(); });
+$("pause-btn").addEventListener("click", () => post({ paused: !state.data.paused }));
+$("idle").addEventListener("change", e => post({ idle_minutes: +e.target.value }));
+let resizeTimer;
+window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => state.data && renderChart(state.data), 120); });
+// Keep "today" live while the page is open.
+setInterval(() => { if (!document.hidden && state.data && state.data.next === null) load(); }, 30000);
+
+// ---------------------------------------------------------------- community sharing
+let share = null;
+
+async function loadShare() {
+  share = await (await fetch("/api/share")).json();
+  if (!share.available) return;
+  $("share-link").style.display = "inline";
+  $("share-link").textContent = `Community sharing: ${share.enabled ? "on" : "off"}`;
+  $("privacy-line").textContent = share.enabled
+    ? "Anonymous daily app totals are shared with the community."
+    : "All data stays on this computer.";
+  for (const id of ["consent-privacy", "panel-privacy"]) $(id).href = share.privacy_url;
+  $("community-wrap").style.display = share.community_url ? "inline" : "none";
+  if (share.community_url) $("community-link").href = share.community_url;
+  if (!share.decided && !$("consent").open) $("consent").showModal();
+  if ($("share-panel").open) renderSharePanel();
+}
+
+function renderSharePanel() {
+  $("share-state").textContent = share.enabled ? "Sharing is on" : "Sharing is off";
+  $("share-status").textContent = share.enabled
+    ? (share.last_status || `Since ${niceDate(share.since)}. The first upload happens after today ends.`)
+    : (share.last_status || "Nothing is sent.");
+  $("share-toggle").textContent = share.enabled ? "Turn off" : "Turn on";
+  $("share-toggle").className = share.enabled ? "" : "primary";
+
+  const pending = share.enabled && share.preview.some(p => p.day !== share.today);
+  $("preview-title").textContent = pending ? "Waiting to be sent" : "What would be shared for today (so far)";
+  const box = $("preview");
+  box.replaceChildren();
+  if (!share.preview.length) {
+    const e = document.createElement("div"); e.className = "muted"; e.textContent = "Nothing tracked yet today."; box.append(e);
+  } else {
+    const t = document.createElement("table");
+    const hidden = new Set(share.hidden);
+    for (const p of share.preview) {
+      const r = t.insertRow();
+      const c = r.insertCell(); c.className = "day"; c.colSpan = 2;
+      c.textContent = `${niceDate(p.day, { weekday: "short", day: "numeric", month: "short" })}${p.day === share.today ? " (in progress, not sent yet)" : ""} · screen time ${fmt(p.screen)}`;
+      for (const a of p.apps) {
+        if (hidden.has(a.exe)) continue;
+        const ar = t.insertRow();
+        ar.insertCell().textContent = a.name;
+        ar.insertCell().textContent = fmt(a.seconds);
+      }
+    }
+    box.append(t);
+  }
+
+  const list = $("hide-list");
+  list.replaceChildren();
+  for (const a of share.apps) {
+    const label = document.createElement("label");
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = share.hidden.includes(a.exe);
+    cb.addEventListener("change", async () => {
+      const hidden = new Set(share.hidden);
+      cb.checked ? hidden.add(a.exe) : hidden.delete(a.exe);
+      await postShare({ hidden: [...hidden] });
+    });
+    const name = document.createElement("span"); name.textContent = a.name;
+    label.append(cb, name);
+    list.append(label);
+  }
+  if (!share.apps.length) { const e = document.createElement("div"); e.className = "muted"; e.textContent = "No apps yet."; list.append(e); }
+  $("share-delete").disabled = !share.has_id;
+}
+
+async function postShare(body) {
+  await fetch("/api/share", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  await loadShare();
+}
+
+$("consent-yes").addEventListener("click", async () => { $("consent").close(); await postShare({ enabled: true }); });
+$("consent-no").addEventListener("click", async () => { $("consent").close(); await postShare({ enabled: false }); });
+$("consent").addEventListener("cancel", e => e.preventDefault()); // needs an answer, not Esc
+$("share-link").addEventListener("click", () => { renderSharePanel(); $("share-panel").showModal(); });
+$("share-close").addEventListener("click", () => $("share-panel").close());
+$("share-toggle").addEventListener("click", () => postShare({ enabled: !share.enabled }));
+$("share-delete").addEventListener("click", async () => {
+  if (!confirm("Delete everything this computer has shared with the community server and turn sharing off?")) return;
+  const res = await fetch("/api/share/delete", { method: "POST" });
+  if (!res.ok) { alert((await res.json()).error || "Something went wrong."); return; }
+  await loadShare();
+});
+
+load();
+loadShare();
+</script>
+</body>
+</html>

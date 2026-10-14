@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AppTime Community</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f4f2; --surface: #fcfcfb; --border: #e4e3df; --track: #edece8;
+    --text: #0b0b0b; --text-2: #52514e; --text-3: #7a7974;
+    --people: #2a78d6; --hours: #eb6834;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #111110; --surface: #1a1a19; --border: #2c2c2a; --track: #262624;
+      --text: #ffffff; --text-2: #c3c2b7; --text-3: #8f8e86;
+      --people: #3987e5; --hours: #d95926;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #111110; --surface: #1a1a19; --border: #2c2c2a; --track: #262624;
+    --text: #ffffff; --text-2: #c3c2b7; --text-3: #8f8e86;
+    --people: #3987e5; --hours: #d95926;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 32px 16px 48px; }
+  header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 24px; }
+  h1 { margin: 0; font-size: 28px; letter-spacing: -0.02em; }
+  .sub { color: var(--text-2); margin-top: 2px; }
+  .tabs { display: inline-flex; background: var(--track); border-radius: 10px; padding: 3px; }
+  .tabs button { font: inherit; border: none; background: transparent; color: var(--text-2); border-radius: 8px; padding: 6px 14px; cursor: pointer; }
+  .tabs button[aria-pressed="true"] { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .tabs button:focus-visible { outline: 2px solid var(--people); outline-offset: 2px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+  .heroes { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 16px; }
+  .k { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); font-weight: 600; }
+  .big { font-size: 44px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.1; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .note { color: var(--text-2); font-size: 13px; margin-top: 4px; }
+  .lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+  h2 { font-size: 17px; margin: 0 0 2px; }
+  .row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; padding: 8px 0; }
+  .rank { color: var(--text-3); font-variant-numeric: tabular-nums; grid-row: span 2; font-weight: 600; }
+  .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .val { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+  .bar { grid-column: 2 / 4; height: 8px; background: var(--track); border-radius: 4px; overflow: hidden; }
+  .bar div { height: 100%; border-radius: 4px; }
+  .empty { color: var(--text-3); padding: 24px 0; text-align: center; }
+  footer { color: var(--text-3); font-size: 13px; margin-top: 24px; display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>AppTime Community</h1>
+      <div class="sub" id="sub">What everyone's screens have been showing</div>
+    </div>
+    <div class="tabs" role="group" aria-label="Time range">
+      <button type="button" data-range="week">Last 7 days</button>
+      <button type="button" data-range="month">Last 30 days</button>
+      <button type="button" data-range="all">All time</button>
+    </div>
+  </header>
+
+  <div class="heroes">
+    <div class="card"><div class="k">People sharing</div><div class="big" id="people">–</div><div class="note" id="people-note"></div></div>
+    <div class="card"><div class="k">Average screen time</div><div class="big" id="screen">–</div><div class="note">per person, per day</div></div>
+    <div class="card"><div class="k">Hivemind score</div><div class="big" id="hive">–</div><div class="note" id="hive-note"></div></div>
+  </div>
+
+  <div class="lists">
+    <section class="card">
+      <h2>Apps the most people use</h2>
+      <div class="note">Share of people who had it on screen</div>
+      <div id="people-list"></div>
+    </section>
+    <section class="card">
+      <h2>Apps with the most hours</h2>
+      <div class="note">Total hours across everyone</div>
+      <div id="hours-list"></div>
+    </section>
+  </div>
+
+  <footer>
+    <span id="foot"></span>
+  </footer>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+let range = "month";
+
+function hm(hours) {
+  const h = Math.floor(hours), m = Math.round((hours - h) * 60);
+  return h ? (m ? `${h}h ${m}m` : `${h}h`) : `${m}m`;
+}
+function hiveCaption(score) {
+  if (score == null) return "Needs at least 2 people";
+  if (score >= 60) return "We are one. Resistance is futile.";
+  if (score >= 40) return "Strong hivemind energy";
+  if (score >= 20) return "Some shared brain cells";
+  return "Proudly independent thinkers";
+}
+
+function list(el, apps, value, label, color) {
+  el.replaceChildren();
+  if (!apps.length) {
+    const e = document.createElement("div"); e.className = "empty"; e.textContent = "Not enough data yet."; el.append(e); return;
+  }
+  const max = Math.max(...apps.map(value));
+  apps.forEach((a, i) => {
+    const row = document.createElement("div"); row.className = "row";
+    const rank = document.createElement("div"); rank.className = "rank"; rank.textContent = i + 1;
+    const name = document.createElement("div"); name.className = "name"; name.textContent = a.name; name.title = a.exe;
+    const val = document.createElement("div"); val.className = "val"; val.textContent = label(a);
+    const bar = document.createElement("div"); bar.className = "bar";
+    const fill = document.createElement("div"); fill.style.width = `${Math.max(value(a) / max * 100, 1)}%`; fill.style.background = color;
+    bar.append(fill);
+    row.append(rank, name, val, bar);
+    el.append(row);
+  });
+}
+
+async function load() {
+  document.querySelectorAll(".tabs button").forEach(b => b.setAttribute("aria-pressed", b.dataset.range === range));
+  const d = await (await fetch(`/api/community?range=${range}`)).json();
+  $("people").textContent = d.people.toLocaleString();
+  $("people-note").textContent = `${d.person_days.toLocaleString()} days of data`;
+  $("screen").textContent = d.people ? hm(d.avg_screen_hours) : "–";
+  $("hive").textContent = d.hivemind == null ? "–" : `${d.hivemind}%`;
+  $("hive-note").textContent = hiveCaption(d.hivemind);
+  list($("people-list"), d.most_people, a => a.share, a => `${Math.round(a.share * 100)}%`, "var(--people)");
+  list($("hours-list"), d.most_hours, a => a.hours, a => `${Math.round(a.hours).toLocaleString()}h`, "var(--hours)");
+  $("foot").textContent = `Anonymous daily totals from people who chose to share. Apps used by fewer than ${d.min_users_per_app} people aren't shown. Hivemind score = how much everyone's top ${5} apps overlap.`;
+}
+
+document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => { range = b.dataset.range; load(); }));
+load();
+</script>
+</body>
+</html>

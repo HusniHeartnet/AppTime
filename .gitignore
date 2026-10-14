@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+*.db
+*.db-*
+
+# Server secrets and data must never be committed.
+# (server_cert.pem in the root is the PUBLIC certificate and is meant to be committed.)
+key.pem
+*.key
+server/cert.pem
+server/*.db

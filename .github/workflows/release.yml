@@ -1,0 +1,38 @@
+# Builds AppTime.exe and attaches it to a GitHub Release.
+# Trigger: push a version tag, e.g.  git tag v1.2.0 && git push origin v1.2.0
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check the server certificate is present
+        shell: bash
+        run: |
+          if [ ! -f server_cert.pem ]; then
+            echo "::error::server_cert.pem is missing. Without it community sharing is disabled. See server/README.md step 3."
+            exit 1
+          fi
+
+      - name: Build
+        run: |
+          pip install pyinstaller==6.11.1 -r requirements.txt
+          pyinstaller --onefile --noconsole --name AppTime --add-data "dashboard.html;." --add-data "server_cert.pem;." apptime.py
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/AppTime.exe
+          generate_release_notes: true
