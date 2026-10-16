@@ -24,14 +24,13 @@ fn tray_image() -> Icon {
 }
 
 pub fn run() -> ! {
-    let event_loop = EventLoopBuilder::<TrayEvent>::with_user_event().build();
+    #[allow(unused_mut)]
+    let mut event_loop = EventLoopBuilder::<TrayEvent>::with_user_event().build();
     #[cfg(target_os = "macos")]
-    let event_loop = {
+    {
         use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
-        let mut event_loop = event_loop;
         event_loop.set_activation_policy(ActivationPolicy::Accessory); // menu bar only, no Dock icon
-        event_loop
-    };
+    }
 
     let proxy = event_loop.create_proxy();
     MenuEvent::set_event_handler(Some(move |e| {

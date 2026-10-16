@@ -76,6 +76,9 @@ jobs:
       - name: Test in-app update (install, Update now, restart, uninstall)
         run: python tests/update_e2e.py dist/AppTime-Setup.exe
 
+      - name: Test upgrade from AppTime 1.8 (Python) keeps history
+        run: python tests/upgrade_from_1x.py dist/AppTime-Setup.exe
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows

@@ -51,7 +51,7 @@ core-foundation = "0.10"
 core-graphics = "0.24"
 objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSString", "NSURL", "NSUserDefaults"] }
-objc2-app-kit = { version = "0.2", features = ["NSRunningApplication", "NSWorkspace"] }
+objc2-app-kit = { version = "0.2", features = ["NSRunningApplication", "NSWorkspace", "libc"] }
 
 [build-dependencies]
 winresource = "0.1"

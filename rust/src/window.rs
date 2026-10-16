@@ -140,16 +140,14 @@ fn handle_backup(action: &str) -> Value {
 
 pub fn run() -> ! {
     platform::prepare_window_process();
-    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    #[allow(unused_mut)]
+    let mut event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     #[cfg(target_os = "macos")]
     {
         use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
         // AppTime is a menu bar app; while the dashboard is open, show it in the Dock.
-        let mut event_loop = event_loop;
         event_loop.set_activation_policy(ActivationPolicy::Regular);
-        return run_loop(event_loop);
     }
-    #[cfg(not(target_os = "macos"))]
     run_loop(event_loop)
 }
 
