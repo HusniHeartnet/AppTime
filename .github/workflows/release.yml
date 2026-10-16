@@ -1,12 +1,14 @@
-# Builds AppTime for Windows and macOS and attaches both to a GitHub Release.
+# Builds AppTime (Rust) for Windows and macOS, tests both, and attaches the
+# Windows installer and the Mac disk image to a GitHub Release.
 #
-# Release: push a version tag, e.g.  git tag v1.3.0 && git push origin v1.3.0
-# Test build only (no release): run this workflow by hand from the Actions tab.
+# Release: push a version tag, e.g.  git tag v2.0.0 && git push origin v2.0.0
+# Test build only (no release): push to the v2 branch, or run it from the Actions tab.
 name: Release
 
 on:
   push:
     tags: ["v*"]
+    branches: [v2]
   workflow_dispatch:
 
 permissions:
@@ -17,44 +19,34 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: Swatinem/rust-cache@v2
         with:
-          python-version: "3.12"
+          workspaces: rust
 
-      - name: Check the server certificate is present
-        shell: bash
-        run: |
-          if [ ! -f server_cert.pem ]; then
-            echo "::error::server_cert.pem is missing. Without it community sharing is disabled. See server/README.md step 3."
-            exit 1
-          fi
-
-      - name: Install
-        run: pip install pyinstaller==6.11.1 -r requirements.txt
-
-      - name: Self-test (source)
-        run: python apptime.py --selftest
+      - name: Unit tests
+        working-directory: rust
+        run: cargo test --release
 
       - name: Build
-        run: >
-          pyinstaller --onefile --noconsole --name AppTime
-          --icon assets/AppTime.ico --version-file version_info.txt
-          --hidden-import pystray._win32
-          --add-data "dashboard.html;." --add-data "server_cert.pem;." --add-data "assets;assets"
-          apptime.py
+        working-directory: rust
+        run: cargo build --release
 
       - name: Self-test (built app)
         shell: pwsh
         run: |
-          $p = Start-Process dist/AppTime.exe -ArgumentList "--selftest" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { throw "AppTime.exe --selftest failed with exit code $($p.ExitCode)" }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item rust\target\release\AppTime.exe dist\AppTime.exe
+          $out = & dist\AppTime.exe --selftest | Out-String
+          $out
+          if ($out -notmatch "selftest OK") { throw "selftest failed" }
+          "AppTime.exe: {0:N1} MB" -f ((Get-Item dist\AppTime.exe).Length / 1MB)
 
       - name: Build installer
         shell: pwsh
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
-          $version = python -c "import apptime; print(apptime.APP_VERSION)"
+          $version = (Select-String -Path rust\Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           & $iscc "/DMyVersion=$version" installer\AppTime.iss
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
 
@@ -70,8 +62,6 @@ jobs:
             if (-not (Test-Path $path)) { throw "Missing after install: $path" }
           }
           "Installed: " + (Get-ItemProperty $uninstallKey).DisplayName + " " + (Get-ItemProperty $uninstallKey).DisplayVersion
-          $t = Start-Process "$app\AppTime.exe" -ArgumentList "--selftest" -Wait -PassThru
-          if ($t.ExitCode -ne 0) { throw "Installed AppTime failed its self-test" }
           $u = Start-Process "$app\unins000.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" -Wait -PassThru
           Start-Sleep -Seconds 5
           foreach ($path in "$app\AppTime.exe", $shortcut, $uninstallKey) {
@@ -79,48 +69,76 @@ jobs:
           }
           "Install and uninstall OK"
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Test in-app update (install, Update now, restart, uninstall)
         run: python tests/update_e2e.py dist/AppTime-Setup.exe
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: |
-            dist/AppTime.exe
-            dist/AppTime-Setup.exe
+          path: dist/AppTime-Setup.exe
 
   macos:
-    runs-on: macos-latest  # Apple Silicon (M1 and newer)
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: Swatinem/rust-cache@v2
         with:
-          python-version: "3.12"
+          workspaces: rust
 
-      - name: Install
-        run: pip install pyinstaller==6.11.1 -r requirements.txt
+      - name: Unit tests
+        working-directory: rust
+        run: cargo test --release
 
-      - name: Self-test (source)
-        run: python apptime.py --selftest
-
-      - name: Build
-        run: >
-          pyinstaller --windowed --name AppTime
-          --icon assets/AppTime.icns --osx-bundle-identifier com.husniheartnet.apptime
-          --hidden-import pystray._darwin
-          --add-data "dashboard.html:." --add-data "server_cert.pem:." --add-data "assets:assets"
-          apptime.py
-
-      - name: Make it a menu bar app and sign it (ad hoc)
+      - name: Build (Apple Silicon + Intel)
+        working-directory: rust
         run: |
-          plutil -insert LSUIElement -bool YES dist/AppTime.app/Contents/Info.plist
-          VERSION=$(python -c "import apptime; print(apptime.APP_VERSION)")
-          plutil -replace CFBundleShortVersionString -string "$VERSION" dist/AppTime.app/Contents/Info.plist
-          plutil -replace CFBundleVersion -string "$VERSION" dist/AppTime.app/Contents/Info.plist
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          mkdir -p ../dist
+          lipo -create -output ../dist/AppTime \
+            target/aarch64-apple-darwin/release/AppTime target/x86_64-apple-darwin/release/AppTime
+
+      - name: Make AppTime.app (menu bar app, signed ad hoc)
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' rust/Cargo.toml | head -1)
+          APP=dist/AppTime.app/Contents
+          mkdir -p "$APP/MacOS" "$APP/Resources"
+          mv dist/AppTime "$APP/MacOS/AppTime"
+          cp assets/AppTime.icns "$APP/Resources/AppTime.icns"
+          cat > "$APP/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>AppTime</string>
+            <key>CFBundleDisplayName</key><string>AppTime</string>
+            <key>CFBundleIdentifier</key><string>com.husniheartnet.apptime</string>
+            <key>CFBundleExecutable</key><string>AppTime</string>
+            <key>CFBundleIconFile</key><string>AppTime</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleShortVersionString</key><string>$VERSION</string>
+            <key>CFBundleVersion</key><string>$VERSION</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>LSUIElement</key><true/>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict>
+          </plist>
+          EOF
+          plutil -lint "$APP/Info.plist"
           codesign --force --deep --sign - dist/AppTime.app
+          lipo -info "$APP/MacOS/AppTime"
 
       - name: Self-test (built app)
-        run: dist/AppTime.app/Contents/MacOS/AppTime --selftest
+        run: |
+          OUT=$(dist/AppTime.app/Contents/MacOS/AppTime --selftest)
+          echo "$OUT"
+          echo "$OUT" | grep -q "selftest OK"
+          du -sh dist/AppTime.app
 
       - name: Zip (used by in-app updates)
         run: ditto -c -k --keepParent dist/AppTime.app AppTime-mac.zip

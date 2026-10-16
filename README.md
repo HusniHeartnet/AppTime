@@ -44,9 +44,10 @@ from Applications to the Trash.
 
 AppTime runs quietly in the background. Measured on a normal Windows 11 laptop:
 
-- **Background tracker:** about 0.02% CPU and about 30 MB of memory.
-- **Dashboard window:** about 110 MB more while it's open (a trimmed-down web view),
+- **Background tracker:** about 0.01% CPU and about 2 MB of memory.
+- **Dashboard window:** about 70 MB more while it's open (the system's own web view),
   all of it freed the moment you close the window.
+- **Download:** a few MB.
 
 You'll find it as **AppTime** in Task Manager (or Activity Monitor on Mac), and the bottom of the dashboard
 shows its current CPU and memory use.
@@ -89,15 +90,20 @@ time, how much of a hivemind we are) get posted in our community and on social m
 
 Details: [PRIVACY.md](PRIVACY.md)
 
-## Run from source
+## Build from source
+
+AppTime is written in Rust. With [Rust](https://rustup.rs) installed (on Windows also
+Microsoft's C++ Build Tools):
 
 ```
-pip install -r requirements.txt
-pythonw apptime.py        # Windows
-python3 apptime.py        # Mac
+cd rust
+cargo build --release
 ```
 
-Use `--no-tray` to run it in a console, or `--selftest` to check tracking works and exit.
+The app is `rust/target/release/AppTime` (`AppTime.exe` on Windows). Run it with
+`--selftest` to check tracking works, or `--no-tray` to run it in a console.
+Set `APPTIME_DEV=1` while testing so a development build doesn't take over
+start-at-sign-in or try to install updates.
 
 ## Making a release
 
@@ -105,8 +111,8 @@ Push a version tag and GitHub Actions builds the Windows installer and the Mac d
 tests them (including install, in-app update and uninstall), and attaches them to a release:
 
 ```
-git tag v1.8.0
-git push origin v1.8.0
+git tag v2.0.0
+git push origin v2.0.0
 ```
 
 The community server lives in [`server/`](server/README.md).

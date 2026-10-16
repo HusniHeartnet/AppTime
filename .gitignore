@@ -12,3 +12,6 @@ key.pem
 *.key
 server/cert.pem
 server/*.db
+
+# Rust build output
+rust/target/
