@@ -1,0 +1,34 @@
+# Builds the Rust tracker prototype (prototype-rust/) on pushes to the
+# rust-prototype branch. Not part of releases.
+name: Rust prototype
+
+on:
+  push:
+    branches: [rust-prototype]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: prototype-rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: prototype-rust
+      - name: Build
+        run: cargo build --release
+      - name: Self-test
+        shell: pwsh
+        run: |
+          $out = & .\target\release\AppTimeRs.exe --selftest | Out-String
+          $out
+          if ($out -notmatch "selftest OK") { throw "selftest failed" }
+      - name: Size
+        shell: pwsh
+        run: "'AppTimeRs.exe: {0:N2} MB' -f ((Get-Item target\\release\\AppTimeRs.exe).Length / 1MB)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AppTimeRs
+          path: prototype-rust/target/release/AppTimeRs.exe

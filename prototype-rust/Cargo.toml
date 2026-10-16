@@ -1,0 +1,33 @@
+[package]
+name = "apptime-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Prototype: AppTime's background tracker in Rust, to compare memory and size with the Python version"
+
+[[bin]]
+name = "AppTimeRs"
+path = "src/main.rs"
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+tray-icon = "0.19"
+png = "0.17"
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_HiDpi",
+    "Win32_System_Threading",
+    "Win32_System_SystemInformation",
+    "Win32_System_Console",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dwm",
+] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

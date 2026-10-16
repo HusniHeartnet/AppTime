@@ -12,3 +12,6 @@ key.pem
 *.key
 server/cert.pem
 server/*.db
+
+# Rust prototype build output
+prototype-rust/target/
