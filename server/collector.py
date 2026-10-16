@@ -63,7 +63,7 @@ SYSTEM_EXES = {
     "com.apple.systemsettings", "com.apple.dock", "com.apple.controlcenter", "com.apple.notificationcenterui",
     "com.apple.spotlight", "com.apple.systemuiserver", "com.apple.windowmanager", "com.apple.screencaptureui",
     "com.apple.screensaver.engine", "com.apple.loginwindow", "com.apple.securityagent",
-    "com.apple.coreservices.uiagent", "com.apple.universalaccessauthwarn",
+    "com.apple.coreservices.uiagent", "com.apple.universalaccessauthwarn", "com.apple.accessibilityuiserver",
 }
 
 db_lock = threading.Lock()

@@ -43,6 +43,7 @@ pub const IGNORED: &[&str] = &[
     "com.apple.securityagent",         // password prompts
     "com.apple.coreservices.uiagent",  // "are you sure you want to open" dialogs
     "com.apple.universalaccessauthwarn",
+    "com.apple.accessibilityuiserver",   // accessibility overlays
 ];
 
 pub const WEBVIEW_ARGS: &str = "";
