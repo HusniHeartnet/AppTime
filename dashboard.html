@@ -498,7 +498,7 @@ function renderChart(d) {
   for (let v = 0; v <= top; v += step) {
     const y = padT + plotH - (v / top) * plotH;
     svg.append(el("line", { x1: padL, x2: W, y1: y, y2: y, class: "gridline" }));
-    svg.append(el("text", { x: padL - 8, y: y + 4, "text-anchor": "end", class: "axis" }, v === 0 ? "0" : fmt(v, { hoursOnly: v >= 3600 })));
+    svg.append(el("text", { x: padL - 8, y: y + 4, "text-anchor": "end", class: "axis" }, v === 0 ? "0" : fmt(v, { hoursOnly: v >= 3600 && v % 3600 === 0 })));
   }
 
   const labelEvery = Math.ceil(n / Math.floor(plotW / 34));
